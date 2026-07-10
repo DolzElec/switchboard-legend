@@ -31,10 +31,10 @@ body{font-family:'Barlow Condensed','Barlow',system-ui,sans-serif;background:#e8
 .card{background:#fff;border:0.5px solid #e8e8e8;border-radius:10px;padding:10px 12px;margin-bottom:8px}
 
 /* ── Switchboard grid layout ── */
-.sb-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px;padding:10px 10px 16px}
-.sb-col{display:flex;flex-direction:column;gap:4px}
+.sb-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:6px;padding:10px 10px 16px}
+.sb-col{display:flex;flex-direction:column;gap:4px;min-width:0}
 .sb-col-label{font-size:9px;font-weight:700;color:#999;letter-spacing:1px;text-transform:uppercase;text-align:center;padding:4px 0 2px}
-.circuit-card{display:flex;align-items:center;gap:0;border-radius:8px;overflow:hidden;cursor:pointer;border:1px solid #e0e0e0;background:#fff;transition:all 0.1s;min-height:46px}
+.circuit-card{display:flex;align-items:center;gap:0;border-radius:8px;overflow:hidden;cursor:pointer;border:1px solid #e0e0e0;background:#fff;transition:all 0.1s;height:54px}
 .circuit-card:active{transform:scale(0.98);opacity:0.9}
 .circuit-card.isolated{border-color:#A32D2D!important;background:repeating-linear-gradient(45deg,#fff,#fff 6px,#fbe3e3 6px,#fbe3e3 12px)}
 .iso-badge{background:#A32D2D;color:#fff;font-size:8px;font-weight:800;padding:2px 5px;border-radius:9px;flex-shrink:0;margin-right:6px;letter-spacing:0.3px;white-space:nowrap}
@@ -64,7 +64,10 @@ body{font-family:'Barlow Condensed','Barlow',system-ui,sans-serif;background:#e8
 .phase-W{background:#bdc3c7}
 .phase-B{background:#2980b9}
 .phase-SP{background:#7f8c8d}
-.circuit-card-inner{flex:1;padding:5px 8px;min-width:0}
+.circuit-card-inner{flex:1;padding:5px 8px;min-width:0;align-self:stretch;display:flex;flex-direction:column;justify-content:center}
+.empty-slot-inner{flex:1;padding:5px 8px;min-width:0;align-self:stretch;display:flex;flex-direction:column;justify-content:center}
+.circuit-card.spare{opacity:0.5;background:#f4f4f4;border-color:#d8d8d8;border-style:dashed}
+.circuit-card.spare .circuit-card-label{color:#888;font-weight:500}
 .circuit-card-num{font-size:10px;font-weight:700;color:#999;line-height:1}
 .circuit-card-label{font-size:12px;font-weight:600;color:#111;margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.2}
 .circuit-card-sub{font-size:10px;color:#aaa;margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -72,7 +75,7 @@ body{font-family:'Barlow Condensed','Barlow',system-ui,sans-serif;background:#e8
 .chip-green{background:#EAF3DE;color:#3B6D11}
 .chip-amber{background:#FAEEDA;color:#854F0B}
 .chip-red{background:#FCEBEB;color:#A32D2D}
-.empty-slot{display:flex;align-items:center;border-radius:8px;border:1px dashed #d0d0d0;background:#fafafa;min-height:46px;overflow:hidden;cursor:pointer;opacity:0.75;transition:all 0.1s}
+.empty-slot{display:flex;align-items:center;border-radius:8px;border:1px dashed #d0d0d0;background:#fafafa;height:54px;overflow:hidden;cursor:pointer;opacity:0.75;transition:all 0.1s}
 .empty-slot:active{opacity:1;background:#f0f0f0}
 
 /* ── Phase legend ── */
@@ -286,11 +289,11 @@ if(typeof window!=='undefined')window.addEventListener('online',function(){flush
 
 // ── State ────────────────────────────────────────────────────────────────────
 let S={
-  sites:[],boards:[],users:[],circuits:[],tests:[],rcds:[],
+  customers:[],sites:[],boards:[],users:[],circuits:[],tests:[],rcds:[],
   currentUser:null,
   readOnly:false,
   view:'loading',
-  selectedBoard:null,selectedSite:null,selectedCircuit:null,
+  selectedCustomer:null,selectedBoard:null,selectedSite:null,selectedCircuit:null,
   tab:'board',circuitTab:'info',adminTab:'boards',
   modal:null,error:null,_rcdEditId:null,_circuitDraft:null,_rcdReturn:false,
   plan:{loaded:false,loading:false,plans:[],current:null,items:[],editMode:false,tool:'select',placingType:null,selectedId:null,filterCircuit:null,walls:[],wallDraft:null,hoverId:null,placeCount:0,view:null}
@@ -324,19 +327,20 @@ async function init(){
     return loadPublicBoard(slug);
   }
   S.readOnly=false;
-  let sites,boards;
+  let sites,boards,customers;
   try{
-    [sites,boards]=await Promise.all([
+    [sites,boards,customers]=await Promise.all([
       sb('sites?select=*'),
-      sb('boards?select=*')
+      sb('boards?select=*'),
+      sb('customers?select=*').catch(()=>[])
     ]);
-    cacheSet('home',{sites,boards});hideOffline();flushQueue();
+    cacheSet('home',{sites,boards,customers});hideOffline();flushQueue();
   }catch(e){
     const c=cacheGet('home');
     if(!c){set({view:'error',error:'Could not connect to database.\n\n'+e.message});return;}
-    sites=c.sites;boards=c.boards;showOffline();
+    sites=c.sites;boards=c.boards;customers=c.customers;showOffline();
   }
-  S.sites=sites||[];S.boards=boards||[];S.users=[];
+  S.sites=sites||[];S.boards=boards||[];S.customers=customers||[];S.users=[];
   // QR code direct routing (logged-in staff scanning a QR — Step 2+)
   if(slug){
     const board=S.boards.find(b=>b.qr_slug===slug);
@@ -347,7 +351,7 @@ async function init(){
       return;
     }
   }
-  set({view:'sites'});
+  set({view:'customers'});
   if(!navigator.onLine)showOffline();
 }
 
@@ -379,7 +383,7 @@ async function loadBoard(board,updateState=true){
 // missing slug returns null. Uses the anon key (sbFetch), no login required.
 async function loadPublicBoard(slug){
   S.readOnly=true;
-  S.sites=[];S.boards=[];S.users=[];S.currentUser=null;S.selectedSite=null;
+  S.customers=[];S.sites=[];S.boards=[];S.users=[];S.currentUser=null;S.selectedCustomer=null;S.selectedSite=null;
   S.plan={loaded:false,loading:false,plans:[],current:null,items:[],editMode:false,tool:'select',placingType:null,selectedId:null,filterCircuit:null,walls:[],wallDraft:null,hoverId:null,placeCount:0,view:null};
   set({view:'loading'});
   let data;
@@ -465,7 +469,7 @@ async function doLogin(){
 }
 async function doLogout(){
   await signOutAuth();
-  S.currentUser=null;S.users=[];S.sites=[];S.boards=[];S.circuits=[];S.tests=[];S.rcds=[];
+  S.currentUser=null;S.users=[];S.customers=[];S.sites=[];S.boards=[];S.circuits=[];S.tests=[];S.rcds=[];S.selectedCustomer=null;
   S.selectedBoard=null;S.selectedSite=null;S.selectedCircuit=null;S.readOnly=false;
   set({view:'login'});
 }
@@ -511,8 +515,8 @@ function rcdDeviceList(){
     const prot=circuitsUnderRcd(r.id).map(c=>c.number);
     out.push({kind:'RCD',id:r.id,target:'rcd_id',title:(r.name||'RCD')+' ('+rcdPolesLabel(r.poles)+')',subtitle:(r.rating?esc(r.rating)+' · ':'')+(prot.length?'protects '+prot.join(', '):'no circuits yet'),interval:r.test_interval_months||6,last:rcdLastTest(r.id),tag:(r.name||'RCD')});
   });
-  S.circuits.filter(c=>c.device_type==='RCBO'||(!c.device_type&&c.has_rcd)).slice().sort((a,b)=>(parseInt(a.number)||0)-(parseInt(b.number)||0)).forEach(function(c){
-    out.push({kind:'RCBO',id:c.id,target:'circuit_id',title:'Circuit '+(c.number)+' — '+(c.label||'Unlabelled'),subtitle:'RCBO'+(c.device_rating?' · '+c.device_rating:''),interval:c.test_interval_months||6,last:S.tests.filter(t=>t.circuit_id===c.id).sort((a,b)=>new Date(b.test_date)-new Date(a.test_date))[0]||null,tag:'C'+(c.number)});
+  S.circuits.filter(c=>isRcbo(c)).slice().sort((a,b)=>(parseInt(a.number)||0)-(parseInt(b.number)||0)).forEach(function(c){
+    out.push({kind:'RCBO',id:c.id,target:'circuit_id',title:'Circuit '+(c.number)+' — '+(c.label||'Unlabelled'),subtitle:devTypeString(c)+(c.device_rating?' · '+c.device_rating:''),interval:c.test_interval_months||6,last:S.tests.filter(t=>t.circuit_id===c.id).sort((a,b)=>new Date(b.test_date)-new Date(a.test_date))[0]||null,tag:'C'+(c.number)});
   });
   return out;
 }
@@ -617,7 +621,9 @@ function draw(){
     case'loading':app.innerHTML=`<div class="center-msg"><div style="font-size:40px">⚡</div><div>Loading…</div></div>`;break;
     case'error':app.innerHTML=`<div class="center-msg"><div style="font-size:36px">⚠️</div><div style="color:#A32D2D;white-space:pre-wrap;font-size:13px">${esc(S.error)}</div><button class="add-btn" style="margin-top:12px" onclick="init()">Retry</button></div>`;break;
     case'login':drawLogin(app);break;
+    case'customers':drawCustomers(app);break;
     case'sites':drawSites(app);break;
+    case'boards':drawSiteBoards(app);break;
     case'board':drawBoard(app);break;
     case'circuit':drawCircuit(app);break;
     case'admin':drawAdmin(app);break;
@@ -626,33 +632,102 @@ function draw(){
 }
 
 // ── Sites ─────────────────────────────────────────────────────────────────────
-function drawSites(app){
+function signedInFooter(){
+  return `<div style="display:flex;align-items:center;justify-content:space-between;margin-top:14px;padding-top:12px;border-top:1px solid #eee"><span style="font-size:12px;color:#888">Signed in as <strong style="color:#555">${esc(S.currentUser?S.currentUser.name:'—')}</strong></span><button class="ghost-btn" style="width:auto;padding:7px 16px;margin:0" onclick="doLogout()">Log out</button></div>`;
+}
+// ── Customers (V4.5 landing) ──
+function drawCustomers(app){
   let h=`<div class="topbar">
     <div class="de-logo-wrap">
       <img class="de-logo-img" src="${LOGO_URI}" alt="DolzElec">
       <div class="de-logo-text">
         <div class="de-logo-name">Switchboard Legend</div>
-        <div class="de-logo-app">Select a switchboard</div>
+        <div class="de-logo-app">Select a customer</div>
       </div>
     </div>
   </div><div class="scroll">`;
-  S.sites.forEach(site=>{
-    const siteBoards=S.boards.filter(b=>b.site_id===site.id);
-    h+=`<div class="section-label">${esc(site.name)}</div>`;
-    if(site.address)h+=`<div style="font-size:11px;color:#aaa;margin-bottom:6px">${esc(site.address)}</div>`;
-    if(!siteBoards.length){h+=`<div class="card" style="color:#aaa;font-size:13px;text-align:center;padding:20px">No boards set up yet</div>`;}
-    else siteBoards.forEach(b=>{
+  const custs=(S.customers||[]).slice().sort((a,b)=>String(a.name||'').localeCompare(String(b.name||'')));
+  custs.forEach(cust=>{
+    const n=S.sites.filter(s=>s.customer_id===cust.id).length;
+    h+=`<div class="card" style="cursor:pointer;display:flex;align-items:center;gap:12px" onclick="selCustomer('${cust.id}')">
+      <div style="width:40px;height:40px;border-radius:8px;background:#0d1b2e;color:#f0a500;font-size:16px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0">${esc((String(cust.name||'?').trim().charAt(0)||'?').toUpperCase())}</div>
+      <div style="flex:1;min-width:0"><div style="font-size:14px;font-weight:600">${esc(cust.name)}</div>
+      <div style="font-size:11px;color:#888;margin-top:1px">${cust.contact_name?esc(cust.contact_name)+' · ':''}${n} site${n===1?'':'s'}</div></div>
+      <span style="font-size:22px;color:#ddd;font-weight:300">›</span></div>`;
+  });
+  const unassigned=S.sites.filter(s=>!s.customer_id).length;
+  if(unassigned){
+    h+=`<div class="card" style="cursor:pointer;display:flex;align-items:center;gap:12px" onclick="selCustomer('__unassigned__')">
+      <div style="width:40px;height:40px;border-radius:8px;background:#e0e0e0;color:#999;font-size:16px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0">?</div>
+      <div style="flex:1;min-width:0"><div style="font-size:14px;font-weight:600;color:#777">Unassigned</div>
+      <div style="font-size:11px;color:#888;margin-top:1px">${unassigned} site${unassigned===1?'':'s'} with no customer</div></div>
+      <span style="font-size:22px;color:#ddd;font-weight:300">›</span></div>`;
+  }
+  if(!custs.length&&!unassigned)h+=`<div class="card" style="color:#aaa;font-size:13px;text-align:center;padding:32px">No customers yet.${isOwner()?'<br><span style="font-size:11px">Add one below.</span>':''}</div>`;
+  if(isOwner())h+=`<button class="add-btn" style="width:100%;justify-content:center;margin-top:16px" onclick="openAddCustomer()">+ Add customer</button>`;
+  h+=`<button class="ghost-btn" style="width:100%;margin-top:${isOwner()?'8px':'16px'}" onclick="set({view:'admin',adminTab:'boards'})">⚙ Admin panel</button>`;
+  h+=signedInFooter();
+  h+=`</div>`;
+  app.innerHTML=h;
+}
+function selCustomer(id){
+  if(id==='__unassigned__')S.selectedCustomer={id:'__unassigned__',name:'Unassigned'};
+  else S.selectedCustomer=(S.customers||[]).find(c=>c.id===id)||null;
+  set({view:'sites',selectedSite:null});
+}
+// ── Sites (scoped to selected customer) ──
+function drawSites(app){
+  const cust=S.selectedCustomer||{id:'__unassigned__',name:'Unassigned'};
+  const unassigned=cust.id==='__unassigned__';
+  const sites=S.sites.filter(s=>unassigned?!s.customer_id:s.customer_id===cust.id);
+  let h=`<div style="background:#0d1b2e;flex-shrink:0;padding-top:env(safe-area-inset-top,0px)">
+    <button class="back-btn" onclick="set({view:'customers',selectedCustomer:null})">← Customers</button>
+    <div class="topbar-logo" style="padding:2px 16px 10px"><img src="${LOGO}" alt="DolzElec" style="height:32px"><div class="topbar-logo-text"><div class="topbar-logo-sub">Customer</div><div class="topbar-logo-title">${esc(cust.name)}</div></div></div>
+  </div><div class="scroll">`;
+  if(!sites.length){
+    h+=`<div class="card" style="color:#aaa;font-size:13px;text-align:center;padding:32px">No sites for this customer yet.</div>`;
+  }else{
+    sites.forEach(site=>{
+      const nb=S.boards.filter(b=>b.site_id===site.id).length;
+      h+=`<div class="card" style="display:flex;align-items:center;gap:10px">
+        <div style="flex:1;min-width:0;cursor:pointer" onclick="selSite('${site.id}')"><div style="font-size:14px;font-weight:600">${esc(site.name)}</div>
+        <div style="font-size:11px;color:#888;margin-top:1px">${site.address?esc(site.address)+' · ':''}${nb} board${nb===1?'':'s'}</div></div>
+        ${isOwner()?`<button class="ghost-btn" style="width:auto;padding:6px 12px;margin:0;flex-shrink:0" onclick="openMoveSite('${site.id}')">Move</button>`:''}
+        <span style="font-size:22px;color:#ddd;font-weight:300;cursor:pointer;flex-shrink:0" onclick="selSite('${site.id}')">›</span></div>`;
+    });
+  }
+  if(isOwner())h+=`<button class="add-btn" style="width:100%;justify-content:center;margin-top:16px" onclick="openAddSite()">+ Add site</button>`;
+  h+=signedInFooter();
+  h+=`</div>`;
+  app.innerHTML=h;
+}
+function selSite(id){
+  S.selectedSite=S.sites.find(s=>s.id===id)||null;
+  set({view:'boards'});
+}
+// ── Boards (scoped to selected site) ──
+function drawSiteBoards(app){
+  const site=S.selectedSite;
+  if(!site){set({view:'sites'});return;}
+  const boards=S.boards.filter(b=>b.site_id===site.id);
+  let h=`<div style="background:#0d1b2e;flex-shrink:0;padding-top:env(safe-area-inset-top,0px)">
+    <button class="back-btn" onclick="set({view:'sites',selectedSite:null})">← Sites</button>
+    <div class="topbar-logo" style="padding:2px 16px 10px"><img src="${LOGO}" alt="DolzElec" style="height:32px"><div class="topbar-logo-text"><div class="topbar-logo-sub">${esc(site.address||'Site')}</div><div class="topbar-logo-title">${esc(site.name)}</div></div></div>
+  </div><div class="scroll">`;
+  if(!boards.length){
+    h+=`<div class="card" style="color:#aaa;font-size:13px;text-align:center;padding:32px">No boards set up yet.</div>`;
+  }else{
+    boards.forEach(b=>{
       h+=`<div class="card" style="cursor:pointer;display:flex;align-items:center;gap:12px" onclick="selBoard('${b.id}','${b.site_id||''}')">
         <div style="width:40px;height:40px;border-radius:8px;background:#0d1b2e;color:#f0a500;font-size:9px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;text-align:center;line-height:1.2">DB</div>
-        <div style="flex:1"><div style="font-size:14px;font-weight:600">${esc(b.name)}</div>
+        <div style="flex:1;min-width:0"><div style="font-size:14px;font-weight:600">${esc(b.name)}</div>
         <div style="font-size:11px;color:#888;margin-top:1px">${esc(b.location||'')} · ${b.ways||24}-way · ${b.supply_type==='single_phase'?'Single phase':'3-phase'}</div></div>
         <span style="font-size:22px;color:#ddd;font-weight:300">›</span></div>`;
     });
-  });
-  if(!S.sites.length)h+=`<div class="card" style="color:#aaa;font-size:13px;text-align:center;padding:32px">No sites found.<br><span style="font-size:11px">Set up in admin panel.</span></div>`;
-  if(isOwner())h+=`<button class="add-btn" style="width:100%;justify-content:center;margin-top:16px" onclick="openAddSite()">+ Add site</button>`;
-  h+=`<button class="ghost-btn" style="width:100%;margin-top:${isOwner()?'8px':'16px'}" onclick="set({view:'admin',adminTab:'boards'})">⚙ Admin panel</button>`;
-  h+=`<div style="display:flex;align-items:center;justify-content:space-between;margin-top:14px;padding-top:12px;border-top:1px solid #eee"><span style="font-size:12px;color:#888">Signed in as <strong style="color:#555">${esc(S.currentUser?S.currentUser.name:'—')}</strong></span><button class="ghost-btn" style="width:auto;padding:7px 16px;margin:0" onclick="doLogout()">Log out</button></div></div>`;
+  }
+  h+=`<button class="add-btn" style="width:100%;justify-content:center;margin-top:16px" onclick="openAddBoardFor('${site.id}')">+ Add switchboard</button>`;
+  h+=signedInFooter();
+  h+=`</div>`;
   app.innerHTML=h;
 }
 
@@ -674,10 +749,10 @@ function genReportData(){
     const prot=circuitsUnderRcd(r.id).map(c=>c.number);
     rows.push({kind:'RCD',ident:(r.name||'RCD'),desc:'RCD '+rcdPolesLabel(r.poles)+(prot.length?' \u2014 protects '+prot.join(', '):' \u2014 no circuits'),deviceLabel:(r.rating||rcdPolesLabel(r.poles)),last:si.last,next:si.due,status:reportStatusLabel(si.key),sc:reportStatusColor(si.key)});
   });
-  S.circuits.filter(c=>c.device_type==='RCBO'||(!c.device_type&&c.has_rcd)).slice().sort((a,b)=>(parseInt(a.number)||0)-(parseInt(b.number)||0)).forEach(function(c){
+  S.circuits.filter(c=>isRcbo(c)).slice().sort((a,b)=>(parseInt(a.number)||0)-(parseInt(b.number)||0)).forEach(function(c){
     const last=S.tests.filter(t=>t.circuit_id===c.id).sort((a,b)=>new Date(b.test_date)-new Date(a.test_date))[0]||null;
     const si=statusFromTest(last,c.test_interval_months||6);
-    rows.push({kind:'RCBO',ident:'C'+(c.number||''),desc:(c.label||'Unlabelled'),deviceLabel:'RCBO'+(c.device_rating?' '+c.device_rating:''),last:last,next:si.due,status:reportStatusLabel(si.key),sc:reportStatusColor(si.key)});
+    rows.push({kind:'RCBO',ident:'C'+(c.number||''),desc:(c.label||'Unlabelled'),deviceLabel:devTypeString(c)+(c.device_rating?' '+c.device_rating:''),last:last,next:si.due,status:reportStatusLabel(si.key),sc:reportStatusColor(si.key)});
   });
   return rows;
 }
@@ -771,12 +846,21 @@ function statusFromTest(last,interval){
   return {key:'ok',label:'Current',color:'#3B6D11',due,last};
 }
 function rcdStatusInfo(rcd){return statusFromTest(rcdLastTest(rcd.id),rcd.test_interval_months||6);}
+// ── Device classifiers (V4.5): device_type free-text is one of MCB / RCBO / MCB 3φ / RCBO 3φ / Spare ──
+function devBase(c){const dt=String((c&&c.device_type)||'');if(/^\s*RCBO/i.test(dt))return'RCBO';if(/^\s*Spare/i.test(dt))return'Spare';if(/^\s*MCB/i.test(dt))return'MCB';if(!dt&&c&&c.has_rcd)return'RCBO';return'MCB';}
+function dev3ph(c){return /φ/.test(String((c&&c.device_type)||''))&&!/^\s*Spare/i.test(String((c&&c.device_type)||''));}
+function isRcbo(c){return devBase(c)==='RCBO';}
+function isMcb(c){return devBase(c)==='MCB';}
+function isSpare(c){return devBase(c)==='Spare';}
+function devTypeString(c){const base=devBase(c);if(base==='Spare')return'Spare';return base+(dev3ph(c)?' 3φ':'');}
+function buildDeviceType(base,poles){if(base==='Spare')return'Spare';return base+(poles==='three'?' 3φ':'');}
 function circuitStatusInfo(c){
-  if(c.device_type==='RCBO'||(!c.device_type&&c.has_rcd)){
+  if(isSpare(c))return {key:'spare',label:'Spare',color:null,due:null,last:null};
+  if(isRcbo(c)){
     const last=S.tests.filter(t=>t.circuit_id===c.id).sort((a,b)=>new Date(b.test_date)-new Date(a.test_date))[0]||null;
     return statusFromTest(last,c.test_interval_months||6);
   }
-  if(c.device_type==='MCB'&&c.protected_by_rcd_id){
+  if(isMcb(c)&&c.protected_by_rcd_id){
     const rcd=(S.rcds||[]).find(r=>r.id===c.protected_by_rcd_id);
     if(rcd){const si=rcdStatusInfo(rcd);si.inherited=true;si.rcd=rcd;return si;}
   }
@@ -816,14 +900,35 @@ function rcdOptionsHtml(selectedId){
   o+=`<option value="__add__">\uff0b Add new RCD\u2026</option>`;
   return o;
 }
-function deviceSectionHtml(p,dt,rating,protById,interval,includeInterval){
+function ratingOptionsHtml(sel){
+  const amps=['6A','10A','16A','20A','25A','32A','40A','50A','63A'];
+  const cur=String(sel||'').trim();
+  let o=`<option value=""${!cur?' selected':''}>—</option>`;
+  let matched=false;
+  amps.forEach(function(a){const on=a===cur;if(on)matched=true;o+=`<option value="${a}"${on?' selected':''}>${a}</option>`;});
+  if(cur&&!matched)o=`<option value="${esc(cur)}" selected>${esc(cur)}</option>`+o;
+  return o;
+}
+function deviceSectionHtml(p,dt,poles,rating,protById,interval,includeInterval){
+  const spare=dt==='Spare';
   return `<label class="field-label">Protection device</label>
     <div class="seg" id="${p}-dev-seg">
       <button type="button" class="seg-btn ${dt==='MCB'?'on':''}" onclick="devSetType('${p}','MCB')">MCB</button>
       <button type="button" class="seg-btn ${dt==='RCBO'?'on':''}" onclick="devSetType('${p}','RCBO')">RCBO</button>
+      <button type="button" class="seg-btn ${dt==='Spare'?'on':''}" onclick="devSetType('${p}','Spare')">Spare</button>
     </div>
     <input type="hidden" id="${p}-devtype" value="${dt}">
-    <label class="field-label">Rating / size (optional)</label><input class="field-input" id="${p}-rating" value="${esc(rating||'')}" placeholder="e.g. 20A">
+    <input type="hidden" id="${p}-poles" value="${poles==='three'?'three':'single'}">
+    <div id="${p}-poles-wrap" style="${spare?'display:none':''}">
+      <label class="field-label">Poles</label>
+      <div class="seg" id="${p}-poles-seg">
+        <button type="button" class="seg-btn ${poles==='three'?'':'on'}" onclick="devSetPoles('${p}','single')">1φ</button>
+        <button type="button" class="seg-btn ${poles==='three'?'on':''}" onclick="devSetPoles('${p}','three')">3φ</button>
+      </div>
+    </div>
+    <div id="${p}-rating-wrap" style="${spare?'display:none':''}">
+      <label class="field-label">Rating (amps)</label><select class="field-input" id="${p}-rating">${ratingOptionsHtml(rating)}</select>
+    </div>
     <div id="${p}-protby-wrap" style="${dt==='MCB'?'':'display:none'}">
       <label class="field-label">Protected by</label>
       <select class="field-input" id="${p}-protby" onchange="onProtbyChange('${p}',this)">${rcdOptionsHtml(protById||'')}</select>
@@ -837,9 +942,16 @@ function deviceSectionHtml(p,dt,rating,protById,interval,includeInterval){
 function devSetType(p,t){
   const h=document.getElementById(p+'-devtype');if(h)h.value=t;
   document.querySelectorAll('#'+p+'-dev-seg .seg-btn').forEach(b=>b.classList.toggle('on',b.textContent.trim()===t));
-  const w=document.getElementById(p+'-protby-wrap');if(w)w.style.display=(t==='MCB')?'':'none';
-  const iw=document.getElementById(p+'-interval-wrap');if(iw)iw.style.display=(t==='RCBO')?'':'none';
+  const show=(suf,on)=>{const w=document.getElementById(p+suf);if(w)w.style.display=on?'':'none';};
+  show('-poles-wrap',t!=='Spare');
+  show('-rating-wrap',t!=='Spare');
+  show('-protby-wrap',t==='MCB');
+  show('-interval-wrap',t==='RCBO');
   devUpdateWarn(p);
+}
+function devSetPoles(p,v){
+  const h=document.getElementById(p+'-poles');if(h)h.value=(v==='three'?'three':'single');
+  document.querySelectorAll('#'+p+'-poles-seg .seg-btn').forEach(b=>{const is3=b.textContent.trim()==='3φ';b.classList.toggle('on',(v==='three')===is3);});
 }
 function devUpdateWarn(p){
   const t=document.getElementById(p+'-devtype')?.value;
@@ -857,6 +969,7 @@ function readCircuitDraft(p){
   d.label=g(p+'-label')?.value||'';
   d.nl=g(p+'-nl')?.value||'';
   d.devtype=g(p+'-devtype')?.value||'MCB';
+  d.poles=g(p+'-poles')?.value||'single';
   d.rating=g(p+'-rating')?.value||'';
   d.cable=g(p+'-cable')?.value||'';
   d.notes=g(p+'-notes')?.value||'';
@@ -903,6 +1016,39 @@ function supplyCardHtml(b){
   const items=rows.map(([l,v])=>`<div class="supply-item"><div class="supply-l">${l}</div><div class="supply-v">${v}</div></div>`).join('');
   return `<div class="supply-card"><div class="supply-head"><div class="supply-title">⚡ Supply &amp; main switch</div>${S.readOnly?'':`<button class="supply-edit" onclick="openModal('supply')">${hasExtra?'Edit':'+ Add details'}</button>`}</div><div class="supply-rows">${items}</div></div>`;
 }
+function phaseTabStyle(c,i,b){
+  if(dev3ph(c))return 'background:linear-gradient(180deg,#c0392b 0 33%,#9E9E9E 33% 66%,#2980b9 66% 100%)';
+  return 'background:'+phaseColor(phaseFor(i,b.supply_type));
+}
+function circuitCardHtml(c,i,b,span){
+  const status=statusColor(c);
+  const spare=isSpare(c);
+  const h3=dev3ph(c);
+  span=span||1;
+  const height=span>1?(span*54+(span-1)*4):54;
+  const cls='circuit-card'+(c.isolated?' isolated':'')+(spare?' spare':'');
+  const badge=c.isolated?'<span class="iso-badge">⚠ ISO</span>':spare?'<span class="circuit-card-chip" style="background:#eee;color:#999">SPARE</span>':chipHtml(status);
+  const numLabel=(h3&&span>1)?('Circuits '+i+'–'+(i+span-1)):('Circuit '+i);
+  return `<div class="${cls}" style="height:${height}px" onclick="selCircuit('${c.id}')">
+    <div class="phase-tab" style="${phaseTabStyle(c,i,b)}"></div>
+    <div class="circuit-card-inner">
+      <div class="circuit-card-num">${numLabel}${h3?' · 3φ':''}</div>
+      <div class="circuit-card-label">${esc(c.label||'Unlabelled')}</div>
+      <div class="circuit-card-sub">${esc(devTypeString(c))}${c.device_rating?' · '+esc(c.device_rating):''}</div>
+    </div>
+    ${badge}
+  </div>`;
+}
+function emptySlotHtml(i,phColor){
+  return S.readOnly?`<div class="empty-slot" style="opacity:.55">
+    <div class="phase-tab" style="background:${phColor};opacity:0.3"></div>
+    <div class="empty-slot-inner"><div style="font-size:10px;font-weight:700;color:#ccc">Circuit ${i}</div><div style="font-size:11px;color:#ccc;margin-top:1px">Empty</div></div>
+  </div>`:`<div class="empty-slot" onclick="openAddCircuit(${i})">
+    <div class="phase-tab" style="background:${phColor};opacity:0.3"></div>
+    <div class="empty-slot-inner"><div style="font-size:10px;font-weight:700;color:#ccc">Circuit ${i}</div><div style="font-size:11px;color:#bbb;margin-top:1px">Tap to add</div></div>
+    <span style="font-size:16px;color:#ccc;padding-right:8px;font-weight:300">+</span>
+  </div>`;
+}
 function drawBoard(app){
   const b=S.selectedBoard,site=S.selectedSite;
   const ways=b.ways||24;
@@ -940,66 +1086,37 @@ function drawBoard(app){
       </div>`;
     }
 
+    // 3-phase spanning: a 3φ circuit visually merges its slot + adjacent free slots (up to 3) within its display column
+    const spanOf={},hidden={};
+    S.circuits.forEach(c=>{
+      if(!dev3ph(c))return;
+      const n=parseInt(c.number);if(isNaN(n))return;
+      const colEnd=(n<=half)?half:ways;
+      let span=1;
+      for(let k=1;k<=2;k++){const s=n+k;if(s<=colEnd&&!bySlot[s]){span++;hidden[s]=n;}else break;}
+      spanOf[n]=span;
+    });
+
     h+=`<div class="sb-grid">
       <div class="sb-col">
         <div class="sb-col-label">Circuits 1–${half}</div>`;
 
     // Left column: 1 to half
     for(let i=1;i<=half;i++){
+      if(hidden[i])continue;
       const c=bySlot[i];
-      const ph=phaseFor(i,b.supply_type);
-      const phColor=phaseColor(ph);
-      if(c){
-        const status=statusColor(c);
-        h+=`<div class="circuit-card ${c.isolated?'isolated':''}" onclick="selCircuit('${c.id}')">
-          <div class="phase-tab" style="background:${phColor}"></div>
-          <div class="circuit-card-inner">
-            <div class="circuit-card-num">Circuit ${i}</div>
-            <div class="circuit-card-label">${esc(c.label||'Unlabelled')}</div>
-            ${c.device_type?`<div class="circuit-card-sub">${esc(c.device_type)}</div>`:''}
-          </div>
-          ${c.isolated?'<span class="iso-badge">⚠ ISO</span>':chipHtml(status)}
-        </div>`;
-      }else{
-        h+=S.readOnly?`<div class="empty-slot" style="opacity:.55">
-          <div class="phase-tab" style="background:${phColor};opacity:0.3"></div>
-          <div style="padding:5px 8px;flex:1"><div style="font-size:10px;font-weight:700;color:#ccc">Circuit ${i}</div><div style="font-size:11px;color:#ccc;margin-top:1px">Empty</div></div>
-        </div>`:`<div class="empty-slot" onclick="openAddCircuit(${i})">
-          <div class="phase-tab" style="background:${phColor};opacity:0.3"></div>
-          <div style="padding:5px 8px;flex:1"><div style="font-size:10px;font-weight:700;color:#ccc">Circuit ${i}</div><div style="font-size:11px;color:#bbb;margin-top:1px">Tap to add</div></div>
-          <span style="font-size:16px;color:#ccc;padding-right:8px;font-weight:300">+</span>
-        </div>`;
-      }
+      if(c){h+=circuitCardHtml(c,i,b,spanOf[i]||1);}
+      else{h+=emptySlotHtml(i,phaseColor(phaseFor(i,b.supply_type)));}
     }
 
     h+=`</div><div class="sb-col"><div class="sb-col-label">Circuits ${half+1}–${ways}</div>`;
 
     // Right column: half+1 to ways
     for(let i=half+1;i<=ways;i++){
+      if(hidden[i])continue;
       const c=bySlot[i];
-      const ph=phaseFor(i,b.supply_type);
-      const phColor=phaseColor(ph);
-      if(c){
-        const status=statusColor(c);
-        h+=`<div class="circuit-card ${c.isolated?'isolated':''}" onclick="selCircuit('${c.id}')">
-          <div class="phase-tab" style="background:${phColor}"></div>
-          <div class="circuit-card-inner">
-            <div class="circuit-card-num">Circuit ${i}</div>
-            <div class="circuit-card-label">${esc(c.label||'Unlabelled')}</div>
-            ${c.device_type?`<div class="circuit-card-sub">${esc(c.device_type)}</div>`:''}
-          </div>
-          ${c.isolated?'<span class="iso-badge">⚠ ISO</span>':chipHtml(status)}
-        </div>`;
-      }else{
-        h+=S.readOnly?`<div class="empty-slot" style="opacity:.55">
-          <div class="phase-tab" style="background:${phColor};opacity:0.3"></div>
-          <div style="padding:5px 8px;flex:1"><div style="font-size:10px;font-weight:700;color:#ccc">Circuit ${i}</div><div style="font-size:11px;color:#ccc;margin-top:1px">Empty</div></div>
-        </div>`:`<div class="empty-slot" onclick="openAddCircuit(${i})">
-          <div class="phase-tab" style="background:${phColor};opacity:0.3"></div>
-          <div style="padding:5px 8px;flex:1"><div style="font-size:10px;font-weight:700;color:#ccc">Circuit ${i}</div><div style="font-size:11px;color:#bbb;margin-top:1px">Tap to add</div></div>
-          <span style="font-size:16px;color:#ccc;padding-right:8px;font-weight:300">+</span>
-        </div>`;
-      }
+      if(c){h+=circuitCardHtml(c,i,b,spanOf[i]||1);}
+      else{h+=emptySlotHtml(i,phaseColor(phaseFor(i,b.supply_type)));}
     }
 
     h+=`</div></div>`;
@@ -1016,8 +1133,8 @@ function drawBoard(app){
           <div style="width:4px;align-self:stretch;border-radius:2px;background:${phaseColor(ph)};flex-shrink:0"></div>
           <div style="width:34px;height:34px;border-radius:7px;background:#0d1b2e;color:#f0a500;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0">${esc(c.number)}</div>
           <div style="flex:1;min-width:0"><div style="font-size:14px;font-weight:500">${esc(c.label||'Unlabelled')}</div>
-          <div style="font-size:11px;color:#888;margin-top:1px">${esc(c.device_type||'—')}${c.phase?' · '+esc(c.phase):''}</div></div>
-          ${chipHtml(status)}</div>`;
+          <div style="font-size:11px;color:#888;margin-top:1px">${esc(devTypeString(c))}${c.device_rating?' · '+esc(c.device_rating):''}${c.phase?' · '+esc(c.phase):''}</div></div>
+          ${isSpare(c)?'<span class="circuit-card-chip" style="background:#eee;color:#999">SPARE</span>':chipHtml(status)}</div>`;
       });
     }
     // Archived circuits section (hidden on the public read-only view)
@@ -1088,7 +1205,7 @@ function drawBoard(app){
   const viaQR=!!getSlugFromURL();
   h+=`<div class="bottombar">
     ${viaQR?`<span style="font-size:11px;color:rgba(255,255,255,0.5)">⚡ ${esc(b.name)}</span>`:
-    `<button class="back-btn" style="padding:0;font-size:13px" onclick="set({view:'sites',selectedBoard:null,circuits:[],tests:[]})">← All boards</button>`}
+    `<button class="back-btn" style="padding:0;font-size:13px" onclick="set({view:'boards',selectedBoard:null,circuits:[],tests:[]})">← All boards</button>`}
     <span style="font-size:10px;color:rgba(255,255,255,0.4)">${S.readOnly?'👁 Read-only · shared view':(S.currentUser?'✓ '+esc(S.currentUser.name):'Tap Edit to log in')}</span>
   </div>`;
 
@@ -1126,7 +1243,7 @@ function drawCircuit(app){
     <div style="padding:2px 16px 10px;display:flex;align-items:flex-start;gap:10px">
       <div style="width:6px;border-radius:3px;background:${phColor};align-self:stretch;flex-shrink:0;margin-top:2px"></div>
       <div><div style="font-size:18px;font-weight:700;color:#fff">Circuit ${esc(c.number)} — ${esc(c.label||'Unlabelled')}</div>
-      <div style="font-size:11px;color:rgba(255,255,255,0.7);margin-top:2px">${esc(c.device_type||'—')} · ${phLabel}</div></div>
+      <div style="font-size:11px;color:rgba(255,255,255,0.7);margin-top:2px">${esc(devTypeString(c))}${c.device_rating?' · '+esc(c.device_rating):''} · ${phLabel}</div></div>
     </div>
     <div class="nav-tabs">
       <div class="nav-tab ${S.circuitTab==='info'?'active':''}" onclick="set({circuitTab:'info'})">Info</div>
@@ -1143,7 +1260,7 @@ function drawCircuit(app){
       ['Circuit number',esc(c.number||'—')],
       ['Neutral link',esc(c.neutral_link||'—')],
       ['Phase',phLabel],
-      ['Protection device',esc((c.device_type||'—')+(c.device_rating?' '+c.device_rating:''))],
+      ['Protection device',esc(devTypeString(c)+(c.device_rating?' '+c.device_rating:''))],
       ['Cable size',esc(c.cable_size||'—')],
       ['Install date',fmtDate(c.install_date)],
       ['Last edited by',c.last_edited_by?esc(c.last_edited_by)+(c.last_edited_at?' · '+fmtDate(c.last_edited_at):''):'—']
@@ -1158,9 +1275,11 @@ function drawCircuit(app){
       h+=`<button class="ghost-btn" style="width:100%;margin-top:8px;justify-content:center;${c.isolated?'color:#3B6D11;border-color:#cfe3bd':'color:#A32D2D;border-color:#f3cccc'}" onclick="openModal('${c.isolated?'unisolate':'isolate'}')">${c.isolated?'🔓 Remove isolation':'🔒 Mark as isolated'}</button>`;
     }
   }else{
-    const isRcbo=c.device_type==='RCBO'||(!c.device_type&&c.has_rcd);
-    const protRcd=(c.device_type==='MCB'&&c.protected_by_rcd_id)?(S.rcds||[]).find(r=>r.id===c.protected_by_rcd_id):null;
-    if(c.device_type==='MCB'&&protRcd){
+    const isRcboC=isRcbo(c);const spare=isSpare(c);
+    const protRcd=(isMcb(c)&&c.protected_by_rcd_id)?(S.rcds||[]).find(r=>r.id===c.protected_by_rcd_id):null;
+    if(spare){
+      h+=`<div class="card" style="text-align:center;padding:24px"><p style="font-size:13px;color:#555;margin-bottom:6px">This is a <strong>spare / empty way</strong>.</p><p style="font-size:12px;color:#aaa">No device is fitted, so there's nothing to RCD-test.</p></div>`;
+    } else if(isMcb(c)&&protRcd){
       const si=rcdStatusInfo(protRcd);
       const rtests=S.tests.filter(t=>t.rcd_id===protRcd.id).sort((a,b)=>new Date(b.test_date)-new Date(a.test_date));
       const rlast=rtests[0];let rnext=null;if(rlast&&rlast.test_date){rnext=new Date(rlast.test_date);rnext.setMonth(rnext.getMonth()+(protRcd.test_interval_months||6));}
@@ -1176,7 +1295,7 @@ function drawCircuit(app){
       <div class="section-label">RCD test history</div>`;
       if(!rtests.length){h+=`<div class="card" style="text-align:center;color:#aaa;font-size:13px;padding:24px">No tests logged yet</div>`;}
       else h+=`<div class="card">${rtests.map((t,i)=>`<div class="test-row"${i===rtests.length-1?' style="border-bottom:none"':''}><span style="color:#888;width:80px;flex-shrink:0">${fmtDate(t.test_date)}</span><span style="font-weight:600;width:50px;flex-shrink:0">${t.trip_time_ms!=null?t.trip_time_ms+'ms':'\u2014'}</span><span style="flex:1;color:#888;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(t.tested_by||'\u2014')}</span><span style="font-weight:700;font-size:10px;color:${t.result==='pass'?'#3B6D11':'#A32D2D'};flex-shrink:0">${(t.result||'').toUpperCase()}</span></div>`).join('')}</div>`;
-    } else if(!isRcbo){
+    } else if(!isRcboC){
       h+=`<div class="card" style="text-align:center;padding:24px"><p style="font-size:13px;color:#555;margin-bottom:6px">This circuit is an <strong>MCB</strong> with no RCD assigned.</p><p style="font-size:12px;color:#aaa;margin-bottom:${S.readOnly?'0':'14px'}">Assign a shared RCD so it inherits earth-leakage test status.</p>${S.readOnly?'':`<button class="add-btn" style="margin:0 auto;justify-content:center" onclick="openEditCircuit()">Assign an RCD</button>`}</div>`;
     }else{
       const tf=[
@@ -1223,7 +1342,7 @@ function drawModal(){
     const phLabel={R:'Red phase',W:'White phase',B:'Blue phase',SP:'Single phase'}[ph]||'—';
     const phColor=phaseColor(ph);
     const dft=(S._circuitDraft&&S._circuitDraft.kind==='add')?S._circuitDraft:null;
-    const dt=dft?dft.devtype:'MCB';const rating=dft?dft.rating:'';const protBy=dft?dft.protby:'';
+    const dt=dft?dft.devtype:'MCB';const poles=dft?dft.poles:'single';const rating=dft?dft.rating:'';const protBy=dft?dft.protby:'';
     body=`<div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
       <div style="width:6px;height:40px;border-radius:3px;background:${phColor};flex-shrink:0"></div>
       <div><div class="modal-title" style="margin-bottom:2px">Add circuit ${slot}</div>
@@ -1232,7 +1351,7 @@ function drawModal(){
     ${whoLine}
     <label class="field-label">Label *</label><input class="field-input" id="ac-label" value="${dft?esc(dft.label):''}" placeholder="e.g. Kitchen Appliances">
     <label class="field-label">Neutral link no. *</label><input class="field-input" id="ac-nl" value="${dft?esc(dft.nl):''}" inputmode="numeric" placeholder="e.g. 12">
-    ${deviceSectionHtml('ac',dt,rating,protBy,6,false)}
+    ${deviceSectionHtml('ac',dt,poles,rating,protBy,6,false)}
     <label class="field-label">Cable size</label><input class="field-input" id="ac-cable" value="${dft?esc(dft.cable):''}" placeholder="e.g. 2.5mm² TPS">
     <label class="field-label">Install date</label><input class="field-input" id="ac-date" type="date" value="${dft?esc(dft.date):''}">
     <label class="field-label">Notes</label><textarea class="field-textarea" id="ac-notes" placeholder="Any notes about this circuit…">${dft?esc(dft.notes):''}</textarea>
@@ -1243,12 +1362,12 @@ function drawModal(){
   }
   else if(S.modal==='edit'&&c){
     const dft=(S._circuitDraft&&S._circuitDraft.kind==='edit'&&S._circuitDraft.circuitId===c.id)?S._circuitDraft:null;
-    const dt=dft?dft.devtype:(c.device_type==='RCBO'?'RCBO':'MCB');
+    const dt=dft?dft.devtype:devBase(c);const poles=dft?dft.poles:(dev3ph(c)?'three':'single');
     const rating=dft?dft.rating:(c.device_rating||'');const protBy=dft?dft.protby:(c.protected_by_rcd_id||'');
     body=`<div class="modal-title">Edit — Circuit ${esc(c.number)}</div>${whoLine}
       <label class="field-label">Label</label><input class="field-input" id="e-label" value="${dft?esc(dft.label):esc(c.label||'')}" placeholder="e.g. Kitchen Appliances">
       <label class="field-label">Neutral link no. *</label><input class="field-input" id="e-nl" value="${dft?esc(dft.nl):esc(c.neutral_link||'')}" inputmode="numeric" placeholder="e.g. 12">
-      ${deviceSectionHtml('e',dt,rating,protBy,c.test_interval_months||6,true)}
+      ${deviceSectionHtml('e',dt,poles,rating,protBy,c.test_interval_months||6,true)}
       <label class="field-label">Cable size</label><input class="field-input" id="e-cable" value="${dft?esc(dft.cable):esc(c.cable_size||'')}" placeholder="e.g. 2.5mm² TPS">
       <label class="field-label">Notes</label><textarea class="field-textarea" id="e-notes" placeholder="Any notes…">${dft?esc(dft.notes):esc(c.notes||'')}</textarea>
       ${!loggedIn?pinField:''}
@@ -1400,28 +1519,55 @@ function getPin(){
   return S.currentUser||null;
 }
 
+// V4.6: a 3-phase breaker occupies its way + the next two in the same display column.
+// Saving one absorbs any circuits already sitting in those two ways (archived — reversible from
+// the List view), so a single 3φ breaker renders as one card spanning three, not three separate ones.
+async function absorbThreePhaseSlots(n,selfId,userName){
+  if(isNaN(n))return true;
+  const ways=(S.selectedBoard&&S.selectedBoard.ways)||24;
+  const half=Math.ceil(ways/2);
+  const colEnd=(n<=half)?half:ways;
+  const bySlot={};
+  S.circuits.forEach(x=>{const nn=parseInt(x.number);if(!isNaN(nn))bySlot[nn]=x;});
+  const conflicts=[];
+  for(let k=1;k<=2;k++){const s=n+k;if(s>colEnd)break;const cc=bySlot[s];if(cc&&cc.id!==selfId)conflicts.push(cc);}
+  if(!conflicts.length)return true;
+  const names=conflicts.map(c=>'Circuit '+c.number+(c.label?' — '+c.label:'')).join(' and ');
+  if(!confirm('This 3-phase breaker occupies 3 ways.\n\n'+names+' will be archived (you can restore them anytime from the List view). Continue?'))return false;
+  for(const cc of conflicts){
+    try{await sb('circuits?id=eq.'+cc.id,{method:'PATCH',body:JSON.stringify({archived_at:new Date().toISOString(),archived_by:userName,last_edited_by:userName,last_edited_at:new Date().toISOString()})});}
+    catch(e){showToast('Could not archive Circuit '+cc.number+': '+((e&&e.message)||'error'));return false;}
+  }
+  S.circuits=S.circuits.filter(x=>!conflicts.some(c=>c.id===x.id));
+  return true;
+}
 async function saveAddCircuit(){
   const user=getPin();if(!user)return;
-  const label=(document.getElementById('ac-label')?.value||'').trim();
+  const base=document.getElementById('ac-devtype')?.value||'MCB';
+  const spare=base==='Spare';
+  let label=(document.getElementById('ac-label')?.value||'').trim();
+  if(!label&&spare)label='Spare';
   if(!label){
     const err=document.getElementById('m-err');
     if(err){err.style.display='block';err.textContent='Please enter a label for this circuit.';}
     return;
   }
   const nl=(document.getElementById('ac-nl')?.value||'').trim();
-  if(!nl){const err=document.getElementById('m-err');if(err){err.style.display='block';err.textContent='Please enter the neutral link number.';}showToast('Enter the neutral link number');return;}
+  if(!nl&&!spare){const err=document.getElementById('m-err');if(err){err.style.display='block';err.textContent='Please enter the neutral link number.';}showToast('Enter the neutral link number');return;}
   const btn=document.getElementById('m-save');if(btn)btn.disabled=true;
-  const deviceType=document.getElementById('ac-devtype')?.value||'MCB';
+  const poles=document.getElementById('ac-poles')?.value||'single';
+  if(poles==='three'){const ok=await absorbThreePhaseSlots(parseInt(S._addSlot),null,user.name);if(!ok){if(btn)btn.disabled=false;return;}}
+  const deviceType=buildDeviceType(base,poles);
   let protBy=document.getElementById('ac-protby')?.value||'';if(protBy==='__add__')protBy='';
-  const isProt=(deviceType==='RCBO')||(deviceType==='MCB'&&!!protBy);
+  const isProt=(base==='RCBO')||(base==='MCB'&&!!protBy);
   const data={
     board_id:S.selectedBoard.id,
     number:String(S._addSlot),
     label,
-    neutral_link:nl,
+    neutral_link:nl||null,
     device_type:deviceType,
-    device_rating:(document.getElementById('ac-rating')?.value||'').trim()||null,
-    protected_by_rcd_id:deviceType==='MCB'?(protBy||null):null,
+    device_rating:spare?null:((document.getElementById('ac-rating')?.value||'').trim()||null),
+    protected_by_rcd_id:base==='MCB'?(protBy||null):null,
     cable_size:document.getElementById('ac-cable')?.value||null,
     install_date:document.getElementById('ac-date')?.value||null,
     notes:document.getElementById('ac-notes')?.value||null,
@@ -1513,13 +1659,17 @@ async function saveArchive_fromList(id,name){
 
 async function saveEdit(){
   const user=getPin();if(!user)return;
+  const eBase=document.getElementById('e-devtype')?.value||'MCB';
+  const eSpare=eBase==='Spare';
   const enl=(document.getElementById('e-nl')?.value||'').trim();
-  if(!enl){const err=document.getElementById('m-err');if(err){err.style.display='block';err.textContent='Please enter the neutral link number.';}showToast('Enter the neutral link number');return;}
+  if(!enl&&!eSpare){const err=document.getElementById('m-err');if(err){err.style.display='block';err.textContent='Please enter the neutral link number.';}showToast('Enter the neutral link number');return;}
   const btn=document.getElementById('m-save');if(btn)btn.disabled=true;
-  const eType=document.getElementById('e-devtype')?.value||'MCB';
+  const ePoles=document.getElementById('e-poles')?.value||'single';
+  if(ePoles==='three'){const ok=await absorbThreePhaseSlots(parseInt(S.selectedCircuit.number),S.selectedCircuit.id,user.name);if(!ok){if(btn)btn.disabled=false;return;}}
+  const eType=buildDeviceType(eBase,ePoles);
   let eProt=document.getElementById('e-protby')?.value||'';if(eProt==='__add__')eProt='';
-  const eIsProt=(eType==='RCBO')||(eType==='MCB'&&!!eProt);
-  const data={label:document.getElementById('e-label')?.value||null,neutral_link:enl,device_type:eType,device_rating:(document.getElementById('e-rating')?.value||'').trim()||null,protected_by_rcd_id:eType==='MCB'?(eProt||null):null,cable_size:document.getElementById('e-cable')?.value||null,notes:document.getElementById('e-notes')?.value||null,has_rcd:eIsProt,test_interval_months:eType==='RCBO'?(parseInt(document.getElementById('e-interval')?.value)||6):6,last_edited_by:user.name,last_edited_at:new Date().toISOString()};
+  const eIsProt=(eBase==='RCBO')||(eBase==='MCB'&&!!eProt);
+  const data={label:document.getElementById('e-label')?.value||null,neutral_link:enl||null,device_type:eType,device_rating:eSpare?null:((document.getElementById('e-rating')?.value||'').trim()||null),protected_by_rcd_id:eBase==='MCB'?(eProt||null):null,cable_size:document.getElementById('e-cable')?.value||null,notes:document.getElementById('e-notes')?.value||null,has_rcd:eIsProt,test_interval_months:eBase==='RCBO'?(parseInt(document.getElementById('e-interval')?.value)||6):6,last_edited_by:user.name,last_edited_at:new Date().toISOString()};
   try{
     const res=await sb(`circuits?id=eq.${S.selectedCircuit.id}`,{method:'PATCH',body:JSON.stringify(data)});
     const updated=Array.isArray(res)?res[0]:res;
@@ -1783,7 +1933,7 @@ async function confirmDeleteBoard(boardId){
 function drawAdmin(app){
   const t=S.adminTab||'boards';
   let h=`<div style="background:#0d1b2e;flex-shrink:0;padding-top:env(safe-area-inset-top,0px)">
-    <button class="back-btn" onclick="set({view:'sites'})">← Back</button>
+    <button class="back-btn" onclick="set({view:'customers'})">← Back</button>
     <div class="topbar-logo" style="padding:2px 16px 10px"><img src="${LOGO}" alt="DolzElec" style="height:32px"><div class="topbar-logo-text"><div class="topbar-logo-sub">Admin Panel</div><div class="topbar-logo-title">${esc(S.sites[0]?.name||'')}</div></div></div>
     <div class="nav-tabs">
       <div class="nav-tab ${t==='boards'?'active':''}" onclick="set({adminTab:'boards'})">Boards</div>
@@ -1883,7 +2033,8 @@ async function doAddSite(){
       name,
       address:(document.getElementById('ns-addr')?.value||'').trim()||null,
       notify_email_1:(document.getElementById('ns-e1')?.value||'').trim()||null,
-      notify_email_2:(document.getElementById('ns-e2')?.value||'').trim()||null
+      notify_email_2:(document.getElementById('ns-e2')?.value||'').trim()||null,
+      customer_id:(S.selectedCustomer&&S.selectedCustomer.id!=='__unassigned__')?S.selectedCustomer.id:null
     })});
     const ns=Array.isArray(res)?res[0]:res;
     if(!ns||!ns.id)throw new Error('the site was not created — your database may need an insert (RLS) policy for owners.');
@@ -1892,12 +2043,80 @@ async function doAddSite(){
     set({view:'sites'});showToast('✓ Site added');
   }catch(e){if(btn){btn.disabled=false;btn.textContent='Add site';}if(err){err.style.display='block';err.textContent='Failed: '+((e&&e.message)||'unknown');}}
 }
+function openAddCustomer(){
+  if(!isOwner()){promptLogin();return;}
+  const o=document.createElement('div');o.className='modal-overlay';
+  o.onclick=e=>{if(e.target===o)o.remove();};
+  o.innerHTML=`<div class="modal-box">
+    <div class="modal-title">Add a customer</div>
+    <div class="info-note" style="margin-bottom:12px">A customer groups sites together (e.g. a builder or property manager). Only owners can add customers.</div>
+    <label class="field-label">Customer name</label><input class="field-input" id="nc-name" placeholder="e.g. Hindmarsh Building Co">
+    <label class="field-label">Contact name (optional)</label><input class="field-input" id="nc-contact" placeholder="e.g. Sam Jones">
+    <label class="field-label">Phone (optional)</label><input class="field-input" id="nc-phone" type="tel" inputmode="tel" placeholder="e.g. 0400 000 000">
+    <div class="err-msg" id="nc-err"></div>
+    <button class="primary-btn" id="nc-save" onclick="doAddCustomer()">Add customer</button>
+    <button class="cancel-btn" onclick="this.closest('.modal-overlay').remove()">Cancel</button>
+  </div>`;
+  document.getElementById('app').appendChild(o);
+  setTimeout(function(){const e=document.getElementById('nc-name');if(e)e.focus();},50);
+}
+async function doAddCustomer(){
+  if(!isOwner()){promptLogin();return;}
+  const name=(document.getElementById('nc-name')?.value||'').trim();
+  const err=document.getElementById('nc-err');if(err)err.style.display='none';
+  if(!name){if(err){err.style.display='block';err.textContent='Please enter a customer name.';}return;}
+  const btn=document.getElementById('nc-save');if(btn){btn.disabled=true;btn.textContent='Adding…';}
+  try{
+    const res=await sb('customers',{method:'POST',body:JSON.stringify({
+      name,
+      contact_name:(document.getElementById('nc-contact')?.value||'').trim()||null,
+      phone:(document.getElementById('nc-phone')?.value||'').trim()||null
+    })});
+    const nc=Array.isArray(res)?res[0]:res;
+    if(!nc||!nc.id)throw new Error('the customer was not created — the database may need an insert (RLS) policy for owners.');
+    S.customers=[...S.customers,nc];
+    document.querySelector('.modal-overlay')?.remove();
+    set({view:'customers'});showToast('✓ Customer added');
+  }catch(e){if(btn){btn.disabled=false;btn.textContent='Add customer';}if(err){err.style.display='block';err.textContent='Failed: '+((e&&e.message)||'unknown');}}
+}
+function openMoveSite(siteId){
+  if(!isOwner()){promptLogin();return;}
+  const site=S.sites.find(s=>s.id===siteId);if(!site)return;
+  const opts=`<option value="">Unassigned</option>`+(S.customers||[]).slice().sort((a,b)=>String(a.name||'').localeCompare(String(b.name||''))).map(c=>`<option value="${c.id}"${c.id===site.customer_id?' selected':''}>${esc(c.name)}</option>`).join('');
+  const o=document.createElement('div');o.className='modal-overlay';
+  o.onclick=e=>{if(e.target===o)o.remove();};
+  o.innerHTML=`<div class="modal-box">
+    <div class="modal-title">Move site</div>
+    <p style="font-size:13px;color:#555;margin-bottom:12px">Assign <strong>${esc(site.name)}</strong> to a customer.</p>
+    <label class="field-label">Customer</label>
+    <select class="field-input" id="ms-cust">${opts}</select>
+    <div class="err-msg" id="ms-err"></div>
+    <button class="primary-btn" id="ms-save" onclick="doMoveSite('${site.id}')">Save</button>
+    <button class="cancel-btn" onclick="this.closest('.modal-overlay').remove()">Cancel</button>
+  </div>`;
+  document.getElementById('app').appendChild(o);
+}
+async function doMoveSite(siteId){
+  if(!isOwner()){promptLogin();return;}
+  const sel=document.getElementById('ms-cust');const cid=sel?sel.value:'';
+  const btn=document.getElementById('ms-save');if(btn){btn.disabled=true;btn.textContent='Saving…';}
+  const err=document.getElementById('ms-err');if(err)err.style.display='none';
+  try{
+    const res=await sb('sites?id=eq.'+siteId,{method:'PATCH',body:JSON.stringify({customer_id:cid||null})});
+    const u=Array.isArray(res)?res[0]:res;
+    const merged=Object.assign({},S.sites.find(s=>s.id===siteId)||{},u||{},{customer_id:cid||null});
+    S.sites=S.sites.map(s=>s.id===siteId?merged:s);
+    document.querySelector('.modal-overlay')?.remove();
+    draw();showToast('✓ Site moved');
+  }catch(e){if(btn){btn.disabled=false;btn.textContent='Save';}if(err){err.style.display='block';err.textContent='Failed: '+((e&&e.message)||'unknown');}}
+}
+function openAddBoardFor(siteId){S._addBoardSite=siteId;openAddBoard();}
 function openAddBoard(){
   const o=document.createElement('div');o.className='modal-overlay';
   o.onclick=e=>{if(e.target===o)o.remove();};
   o.innerHTML=`<div class="modal-box">
     <div class="modal-title">Add switchboard</div>
-    ${S.sites.length>1?`<label class="field-label">Site</label><select class="field-input" id="nb-site">${S.sites.map(s=>`<option value="${s.id}">${esc(s.name)}</option>`).join('')}</select>`:''}
+    ${S.sites.length>1?`<label class="field-label">Site</label><select class="field-input" id="nb-site">${S.sites.map(s=>`<option value="${s.id}"${s.id===S._addBoardSite?' selected':''}>${esc(s.name)}</option>`).join('')}</select>`:''}
     <label class="field-label">Board name</label><input class="field-input" id="nb-name" placeholder="e.g. Distribution Board 2">
     <label class="field-label">Location</label><input class="field-input" id="nb-loc" placeholder="e.g. Level 1, Workshop">
     <label class="field-label">Number of poles</label>
@@ -1933,7 +2152,7 @@ async function doAddBoard(){
       location:document.getElementById('nb-loc')?.value||null,
       ways:parseInt(document.getElementById('nb-ways')?.value)||24,
       supply_type:window._supply||'three_phase',
-      site_id:document.getElementById('nb-site')?.value||S.sites[0]?.id
+      site_id:document.getElementById('nb-site')?.value||S._addBoardSite||S.selectedSite?.id||S.sites[0]?.id
     })});
     const nb=Array.isArray(res)?res[0]:res;
     S.boards=[...S.boards,nb];
