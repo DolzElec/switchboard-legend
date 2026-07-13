@@ -1111,7 +1111,7 @@ function buildLegend(){
     +'<table class="leg"><thead><tr><th class="write">As labelled</th><th class="cnum">#</th>'+phHead+'<th>Circuit / description</th><th class="cnum rgt">#</th>'+phHead+'<th>Circuit / description</th><th class="write">As labelled</th></tr></thead><tbody>'+body+'</tbody></table>'
     +'<div class="foot">DolzElec Switchboard Legend &middot; '+esc(b.name||'Board')+' &middot; Printed '+esc(gen)+'</div>'
     +'</div></div></div>';
-  const html='<!doctype html><html><head><meta charset="utf-8"><title>'+title+'</title><style>'+css+'</style></head><body>'+bodyInner+'</body></html>';
+  const html='<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=703, initial-scale=1"><title>'+title+'</title><style>'+css+'</style></head><body>'+bodyInner+'</body></html>';
   return {b:b,site:site,html:html,title:title};
 }
 function printLegend(){
@@ -1128,7 +1128,10 @@ function printLegend(){
       const inner=d.querySelector('.sheet-scale'),wrap=d.querySelector('.sheet-wrap');
       if(!inner||!wrap)return;
       const PRINTABLE_H=1030;   // A4 (297mm) minus 12mm top+bottom margins, at ~96dpi
-      const h=inner.scrollHeight;
+      // Some mobile browsers lay the offscreen frame out at their own width, so the
+      // measured height is unreliable. Use the larger of measured vs a row-count estimate.
+      const rows=(d.querySelectorAll('table.leg tbody tr')||[]).length;
+      const h=Math.max(inner.scrollHeight,200+rows*46);
       if(h>PRINTABLE_H){
         const s=Math.max(0.35,(PRINTABLE_H-2)/h);
         inner.style.transform='scale('+s+')';
