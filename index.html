@@ -1059,7 +1059,7 @@ function buildLegend(){
       cover.rem=spanOf[i]-1;
       const label=esc(c.label||'Unlabelled');
       const type=esc(devTypeString(c))+(c.device_rating?' · '+esc(c.device_rating):'');
-      return numPh+`<td class="desc span3" rowspan="${spanOf[i]}">${label}<div class="sub">${type} · 3φ</div></td>`;
+      return numPh+`<td class="desc span3" rowspan="${spanOf[i]}">${label}<div class="sub">${type}</div></td>`;
     }
     if(!c)return numPh+'<td class="desc"><span class="muted">Spare / not used</span></td>';
     if(isSpare(c))return numPh+'<td class="desc"><span class="spare">SPARE</span></td>';
