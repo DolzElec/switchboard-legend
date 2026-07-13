@@ -18,6 +18,7 @@
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
 body{font-family:'Barlow Condensed','Barlow',system-ui,sans-serif;background:#e8e8e8;min-height:100vh;display:flex;justify-content:center}
 #app{width:100%;max-width:480px;min-height:100vh;display:flex;flex-direction:column;background:#f5f5f5;position:relative}
+@media (orientation:landscape){#app{max-width:100%}}
 .topbar{background:#0d1b2e;padding:calc(env(safe-area-inset-top,0px) + 14px) 16px 10px;flex-shrink:0}
 .topbar-label{font-size:10px;font-weight:500;color:rgba(255,255,255,0.55);letter-spacing:1px;text-transform:uppercase}
 .topbar-title{font-size:20px;font-weight:700;color:#fff;margin-top:2px}
@@ -1018,13 +1019,15 @@ function buildLegend(){
   // Work out which ways a 3φ circuit spans, so covered ways read "part of C…".
   const half=Math.ceil(ways/2);
   const horizontal=b.orientation==='horizontal';
-  const hidden={};
+  const hidden={},spanOf={};
   S.circuits.forEach(c=>{
     if(!dev3ph(c))return;
     const n=parseInt(c.number);if(isNaN(n))return;
+    let span=1;
     for(const s of threePhaseNeighbors(n,ways,b.orientation)){
-      if(!bySlot[s])hidden[s]=n;else break;
+      if(!bySlot[s]){hidden[s]=n;span++;}else break;
     }
+    spanOf[n]=span;
   });
   const now=new Date();
   const gen=now.toLocaleString('en-AU',{day:'numeric',month:'long',year:'numeric',hour:'numeric',minute:'2-digit'});
@@ -1039,34 +1042,41 @@ function buildLegend(){
   if(b.main_switch_rating)meta.push(['Main switch',esc(b.main_switch_rating)]);
   meta.push(['Printed',esc(gen)]);
   const metaRows=meta.map(m=>`<tr><td class="ml">${m[0]}</td><td class="mv">${m[1]}</td></tr>`).join('');
-  // Render the number + phase + description cells for one side (one slot).
-  // Returns '' worth of <td>s; `edge` adds the centre-divider border on the right column.
-  function sideCells(i,edge){
+  // Render one side's cells for a print row. A 3φ head emits a single description
+  // cell that spans (rowspan) its 2–3 badges, so the breaker is labelled ACROSS all
+  // its circuit badges; the covered slots below emit only their number + phase dot.
+  // `cover.rem` carries the rowspan coverage down this column between rows.
+  function cells(i,edge,cover){
     const rgt=edge?' rgt':'';
-    if(i==null||i<1||i>ways){
-      // Non-existent slot (odd way-count leaves the last right cell empty).
-      const ph=isThreePhase?'<td class="ph"></td>':'';
-      return `<td class="cnum blank${rgt}"></td>${ph}<td class="desc"></td>`;
-    }
-    const ph=isThreePhase?`<td class="ph"><span class="dot" style="background:${phaseColor(phaseForSlot(i,b.ways,b.orientation,b.supply_type))}"></span></td>`:'';
-    const num=`<td class="cnum${rgt}">${i}</td>`;
-    if(hidden[i])return `${num}${ph}<td class="desc"><span class="muted">↳ part of circuit ${hidden[i]}</span></td>`;
+    const blank=(i==null||i<1||i>ways);
+    const num=blank?`<td class="cnum blank${rgt}"></td>`:`<td class="cnum${rgt}">${i}</td>`;
+    const ph=isThreePhase?(blank?'<td class="ph"></td>':`<td class="ph"><span class="dot" style="background:${phaseColor(phaseForSlot(i,b.ways,b.orientation,b.supply_type))}"></span></td>`):'';
+    const numPh=num+ph;
+    if(cover.rem>0){cover.rem--;return numPh;}            // description supplied by a rowspan above
+    if(blank)return numPh+'<td class="desc"></td>';
     const c=bySlot[i];
-    if(!c)return `${num}${ph}<td class="desc"><span class="muted">Spare / not used</span></td>`;
-    if(isSpare(c))return `${num}${ph}<td class="desc"><span class="spare">SPARE</span></td>`;
+    if(c&&dev3ph(c)&&(spanOf[i]||1)>1){
+      cover.rem=spanOf[i]-1;
+      const label=esc(c.label||'Unlabelled');
+      const type=esc(devTypeString(c))+(c.device_rating?' · '+esc(c.device_rating):'');
+      return numPh+`<td class="desc span3" rowspan="${spanOf[i]}">${label}<div class="sub">${type} · 3φ</div></td>`;
+    }
+    if(!c)return numPh+'<td class="desc"><span class="muted">Spare / not used</span></td>';
+    if(isSpare(c))return numPh+'<td class="desc"><span class="spare">SPARE</span></td>';
     const label=esc(c.label||'Unlabelled');
     const type=esc(devTypeString(c))+(c.device_rating?' · '+esc(c.device_rating):'');
-    return `${num}${ph}<td class="desc">${label}<div class="sub">${type}</div></td>`;
+    return numPh+`<td class="desc">${label}<div class="sub">${type}</div></td>`;
   }
   // Two columns side by side, mimicking the board, with a blank "As labelled"
   // write-in strip on the OUTER edge of each column. Pairing follows orientation:
   //   vertical   → across then down: row r = left 2r-1 (odd), right 2r (even)
   //   horizontal → the board's two rows: left = top row r, right = bottom row half+r
+  const coverL={rem:0},coverR={rem:0};
   let body='';
   for(let r=1;r<=half;r++){
     const L=horizontal?r:(2*r-1);
     const R=horizontal?(half+r):(2*r);
-    body+=`<tr><td class="write"></td>${sideCells(L,false)}${sideCells(R,true)}<td class="write"></td></tr>`;
+    body+=`<tr><td class="write"></td>${cells(L,false,coverL)}${cells(R,true,coverR)}<td class="write"></td></tr>`;
   }
   const phHead=isThreePhase?'<th class="ph">Ph</th>':'';
   const title='DolzElec Switchboard Legend - '+(b.name||'Board')+' - '+dstr;
@@ -1076,30 +1086,31 @@ function buildLegend(){
     +'.brandwrap{display:flex;align-items:center;gap:12px}'
     +'.brand{font-size:24px;font-weight:800;color:#f0a500;letter-spacing:2px}'
     +'.htitle{font-size:13px;color:#fff;font-weight:600;text-align:right}'
-    +'.wrap{padding:14px 18px}'
-    +'.mtab{border-collapse:collapse;margin-bottom:10px}.mtab td{padding:2px 0;font-size:12px;vertical-align:top}'
+    +'.wrap{padding:12px 16px}'
+    +'.sheet-wrap{overflow:hidden}.sheet-scale{transform-origin:top left}'
+    +'.mtab{border-collapse:collapse;margin-bottom:8px}.mtab td{padding:1px 0;font-size:11px;vertical-align:top}'
     +'.ml{color:#888;padding-right:14px!important;white-space:nowrap}.mv{font-weight:600}'
-    +'.note{font-size:11px;color:#666;margin:8px 0 12px}'
     +'table.leg{width:100%;border-collapse:collapse;font-size:11px;table-layout:fixed}'
     +'table.leg thead{display:table-header-group}'
-    +'table.leg th{background:#0d1b2e;color:#fff;text-align:left;padding:6px 6px;font-size:9px;text-transform:uppercase;letter-spacing:0.3px}'
-    +'table.leg td{padding:5px 6px;border-bottom:1px solid #ccc;vertical-align:middle;overflow-wrap:break-word;word-wrap:break-word}'
+    +'table.leg th{background:#0d1b2e;color:#fff;text-align:left;padding:5px 6px;font-size:9px;text-transform:uppercase;letter-spacing:0.3px}'
+    +'table.leg td{padding:4px 6px;border-bottom:1px solid #ccc;vertical-align:middle;overflow-wrap:break-word;word-wrap:break-word}'
     +'table.leg tr{page-break-inside:avoid}'
     +'th.write{width:13%}th.cnum{width:5%}th.ph{width:4%}'
     +'td.cnum{font-weight:700;text-align:center;background:#f4f4f4}td.cnum.blank{background:#fff}'
     +'td.ph{text-align:center}.dot{display:inline-block;width:10px;height:10px;border-radius:50%}'
     +'td.desc{font-weight:600;font-size:12px}.sub{font-weight:400;font-size:10px;color:#777;margin-top:1px}.muted{color:#aaa;font-weight:400}'
+    +'td.span3{vertical-align:middle;background:#fbfaf6}'
     +'.spare{display:inline-block;padding:1px 6px;border-radius:10px;background:#eee;color:#999;font-size:9px;font-weight:700;letter-spacing:0.5px}'
     +'.rgt{border-left:2px solid #0d1b2e}'
     +'td.write{background:#f7f7f4;border-left:1px solid #ddd;border-right:1px solid #ddd}'
-    +'.foot{margin-top:14px;font-size:10px;color:#aaa;text-align:center}';
-  const bodyInner='<div class="hdr"><div class="brandwrap"><img class="rlogo" src="'+RLOGO+'"><div class="brand">DOLZELEC</div></div><div class="htitle">Switchboard Legend</div></div>'
+    +'.foot{margin-top:12px;font-size:10px;color:#aaa;text-align:center}';
+  const bodyInner='<div class="sheet-wrap"><div class="sheet-scale">'
+    +'<div class="hdr"><div class="brandwrap"><img class="rlogo" src="'+RLOGO+'"><div class="brand">DOLZELEC</div></div><div class="htitle">Switchboard Legend</div></div>'
     +'<div class="wrap">'
     +'<table class="mtab">'+metaRows+'</table>'
-    +'<div class="note">'+(horizontal?'Two columns mirror the board&rsquo;s two rows &mdash; left = top row (1&ndash;'+half+'), right = bottom row ('+(half+1)+'&ndash;'+ways+').':'Two columns mirror the switchboard &mdash; left = odd circuits (1, 3, 5&hellip;), right = even (2, 4, 6&hellip;), reading across then down.')+' The shaded <strong>&ldquo;As labelled&rdquo;</strong> strips on the outer edges are blank: write the board&rsquo;s own circuit numbers there where they differ from ours.</div>'
     +'<table class="leg"><thead><tr><th class="write">As labelled</th><th class="cnum">#</th>'+phHead+'<th>Circuit / description</th><th class="cnum rgt">#</th>'+phHead+'<th>Circuit / description</th><th class="write">As labelled</th></tr></thead><tbody>'+body+'</tbody></table>'
     +'<div class="foot">DolzElec Switchboard Legend &middot; '+esc(b.name||'Board')+' &middot; Printed '+esc(gen)+'</div>'
-    +'</div>';
+    +'</div></div></div>';
   const html='<!doctype html><html><head><meta charset="utf-8"><title>'+title+'</title><style>'+css+'</style></head><body>'+bodyInner+'</body></html>';
   return {b:b,site:site,html:html,title:title};
 }
@@ -1107,13 +1118,32 @@ function printLegend(){
   const r=buildLegend();if(!r)return;
   const ifr=document.createElement('iframe');
   ifr.setAttribute('aria-hidden','true');
-  ifr.style.cssText='position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden';
+  // Render offscreen at ~A4 printable width so we can measure height and scale to fit one page.
+  ifr.style.cssText='position:fixed;left:-9999px;top:0;width:703px;height:1040px;border:0;background:#fff';
   document.body.appendChild(ifr);
   let done=false;
-  function go(){if(done)return;done=true;setTimeout(function(){try{ifr.contentWindow.focus();ifr.contentWindow.print();}catch(e){showToast('Print not available');}setTimeout(function(){ifr.remove();},1500);},250);}
+  function fitOnePage(){
+    try{
+      const d=ifr.contentWindow.document;
+      const inner=d.querySelector('.sheet-scale'),wrap=d.querySelector('.sheet-wrap');
+      if(!inner||!wrap)return;
+      const PRINTABLE_H=1030;   // A4 (297mm) minus 12mm top+bottom margins, at ~96dpi
+      const h=inner.scrollHeight;
+      if(h>PRINTABLE_H){
+        const s=Math.max(0.35,(PRINTABLE_H-2)/h);
+        inner.style.transform='scale('+s+')';
+        wrap.style.height=Math.ceil(h*s)+'px';   // shrink layout box too, so print sees one page
+      }
+    }catch(e){}
+  }
+  function go(){
+    if(done)return;done=true;
+    fitOnePage();
+    setTimeout(function(){try{ifr.contentWindow.focus();ifr.contentWindow.print();}catch(e){showToast('Print not available');}setTimeout(function(){ifr.remove();},1500);},300);
+  }
   ifr.onload=go;
   const doc=ifr.contentWindow.document;doc.open();doc.write(r.html);doc.close();
-  setTimeout(go,400);
+  setTimeout(go,600);
 }
 async function emailReport(){
   if(S.readOnly){promptLogin();return;}
