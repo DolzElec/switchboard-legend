@@ -35,6 +35,8 @@ body{font-family:'Barlow Condensed','Barlow',system-ui,sans-serif;background:#e8
 .sb-col{display:flex;flex-direction:column;gap:4px;min-width:0}
 .sb-grid-h{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:6px;padding:10px 10px 16px;align-items:start}
 .sb-col-label{font-size:9px;font-weight:700;color:#999;letter-spacing:1px;text-transform:uppercase;text-align:center;padding:4px 0 2px}
+.rotate-hint{display:none;align-items:center;justify-content:center;gap:7px;font-size:12px;color:#7a5c00;background:#fff8e6;border:0.5px solid #f0d896;border-radius:8px;padding:8px 12px;margin:8px 10px 0}
+@media (orientation:portrait){.rotate-hint{display:flex}}
 .circuit-card{display:flex;align-items:center;gap:0;border-radius:8px;overflow:hidden;cursor:pointer;border:1px solid #e0e0e0;background:#fff;transition:all 0.1s;height:54px}
 .circuit-card:active{transform:scale(0.98);opacity:0.9}
 .circuit-card.isolated{border-color:#A32D2D!important;background:repeating-linear-gradient(45deg,#fff,#fff 6px,#fbe3e3 6px,#fbe3e3 12px)}
@@ -571,10 +573,28 @@ async function boot(){
 function esc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
 function fmtDate(d){if(!d)return'—';try{return new Date(d).toLocaleDateString('en-AU');}catch(e){return String(d);}}
 
-function phaseFor(slotNum,supplyType){
+// ── Numbering scheme: number IS the physical slot, mapped across-then-down ──
+// Vertical: 1=top-left, 2=top-right, 3=row2-left … (left col = odds, right col = evens).
+// Horizontal: two rows — top row 1..half L→R, bottom row half+1..ways L→R.
+function slotToCell(n,ways,orientation){
+  const half=ways/2;n=parseInt(n);
+  if(orientation==='horizontal')return (n<=half)?{row:1,col:n}:{row:2,col:n-half};
+  return {row:Math.floor((n-1)/2)+1,col:((n-1)%2)+1};
+}
+// Phase follows physical position (a real busbar): vertical rotates R/W/B down each
+// column; horizontal rotates along each row (2 rows make "down a column" degenerate).
+function phaseForSlot(n,ways,orientation,supplyType){
   if(supplyType==='single_phase')return'SP';
-  const p=((slotNum-1)%3);
-  return['R','W','B'][p];
+  const cell=slotToCell(n,ways,orientation);
+  const idx=(orientation==='horizontal')?(cell.col-1):(cell.row-1);
+  return['R','W','B'][idx%3];
+}
+// Physically-adjacent higher slots a 3φ device at n may absorb, in span order.
+// Vertical: down a column = step 2 (same parity). Horizontal: along a row, row-clamped.
+function threePhaseNeighbors(n,ways,orientation){
+  n=parseInt(n);const half=ways/2;
+  if(orientation==='horizontal'){const end=(n<=half)?half:ways;return [n+1,n+2].filter(s=>s<=end);}
+  return [n+2,n+4].filter(s=>s<=ways);
 }
 
 function phaseColor(ph){
@@ -985,6 +1005,116 @@ function generateReport(){
   const doc=ifr.contentWindow.document;doc.open();doc.write(html);doc.close();
   setTimeout(go,400);
 }
+// ── Printable circuit legend (hardcopy for the physical board) ─────────────────
+// One row per way, in slot order, with a blank "As labelled on board" column so
+// the sparky can hand-write the board's own numbering where it differs from ours.
+function buildLegend(){
+  const b=S.selectedBoard;if(!b){showToast('Open a board first');return null;}
+  const site=S.selectedSite||S.sites.find(s=>s.id===b.site_id)||{};
+  const ways=b.ways||24;
+  const isThreePhase=b.supply_type!=='single_phase';
+  const bySlot={};
+  S.circuits.forEach(c=>{const n=parseInt(c.number);if(!isNaN(n))bySlot[n]=c;});
+  // Work out which ways a 3φ circuit spans, so covered ways read "part of C…".
+  const half=Math.ceil(ways/2);
+  const horizontal=b.orientation==='horizontal';
+  const hidden={};
+  S.circuits.forEach(c=>{
+    if(!dev3ph(c))return;
+    const n=parseInt(c.number);if(isNaN(n))return;
+    for(const s of threePhaseNeighbors(n,ways,b.orientation)){
+      if(!bySlot[s])hidden[s]=n;else break;
+    }
+  });
+  const now=new Date();
+  const gen=now.toLocaleString('en-AU',{day:'numeric',month:'long',year:'numeric',hour:'numeric',minute:'2-digit'});
+  const dstr=now.toISOString().slice(0,10);
+  const meta=[];
+  meta.push(['Site',esc(site.name||'—')]);
+  meta.push(['Board',esc(b.name||'—')]);
+  if(b.location)meta.push(['Location',esc(b.location)]);
+  meta.push(['Supply',isThreePhase?'Three phase':'Single phase']);
+  meta.push(['Ways',esc(String(ways))]);
+  if(b.fed_from)meta.push(['Fed from',esc(b.fed_from)]);
+  if(b.main_switch_rating)meta.push(['Main switch',esc(b.main_switch_rating)]);
+  meta.push(['Printed',esc(gen)]);
+  const metaRows=meta.map(m=>`<tr><td class="ml">${m[0]}</td><td class="mv">${m[1]}</td></tr>`).join('');
+  // Render the number + phase + description cells for one side (one slot).
+  // Returns '' worth of <td>s; `edge` adds the centre-divider border on the right column.
+  function sideCells(i,edge){
+    const rgt=edge?' rgt':'';
+    if(i==null||i<1||i>ways){
+      // Non-existent slot (odd way-count leaves the last right cell empty).
+      const ph=isThreePhase?'<td class="ph"></td>':'';
+      return `<td class="cnum blank${rgt}"></td>${ph}<td class="desc"></td>`;
+    }
+    const ph=isThreePhase?`<td class="ph"><span class="dot" style="background:${phaseColor(phaseForSlot(i,b.ways,b.orientation,b.supply_type))}"></span></td>`:'';
+    const num=`<td class="cnum${rgt}">${i}</td>`;
+    if(hidden[i])return `${num}${ph}<td class="desc"><span class="muted">↳ part of circuit ${hidden[i]}</span></td>`;
+    const c=bySlot[i];
+    if(!c)return `${num}${ph}<td class="desc"><span class="muted">Spare / not used</span></td>`;
+    if(isSpare(c))return `${num}${ph}<td class="desc"><span class="spare">SPARE</span></td>`;
+    const label=esc(c.label||'Unlabelled');
+    const type=esc(devTypeString(c))+(c.device_rating?' · '+esc(c.device_rating):'');
+    return `${num}${ph}<td class="desc">${label}<div class="sub">${type}</div></td>`;
+  }
+  // Two columns side by side, mimicking the board, with a blank "As labelled"
+  // write-in strip on the OUTER edge of each column. Pairing follows orientation:
+  //   vertical   → across then down: row r = left 2r-1 (odd), right 2r (even)
+  //   horizontal → the board's two rows: left = top row r, right = bottom row half+r
+  let body='';
+  for(let r=1;r<=half;r++){
+    const L=horizontal?r:(2*r-1);
+    const R=horizontal?(half+r):(2*r);
+    body+=`<tr><td class="write"></td>${sideCells(L,false)}${sideCells(R,true)}<td class="write"></td></tr>`;
+  }
+  const phHead=isThreePhase?'<th class="ph">Ph</th>':'';
+  const title='DolzElec Switchboard Legend - '+(b.name||'Board')+' - '+dstr;
+  const css='@page{size:A4;margin:12mm}*{box-sizing:border-box;-webkit-print-color-adjust:exact;print-color-adjust:exact}body{font-family:Arial,Helvetica,sans-serif;color:#111;margin:0}'
+    +'.hdr{background:#0d1b2e;padding:14px 22px;display:flex;justify-content:space-between;align-items:center}'
+    +'.rlogo{height:50px;width:auto;display:block}'
+    +'.brandwrap{display:flex;align-items:center;gap:12px}'
+    +'.brand{font-size:24px;font-weight:800;color:#f0a500;letter-spacing:2px}'
+    +'.htitle{font-size:13px;color:#fff;font-weight:600;text-align:right}'
+    +'.wrap{padding:14px 18px}'
+    +'.mtab{border-collapse:collapse;margin-bottom:10px}.mtab td{padding:2px 0;font-size:12px;vertical-align:top}'
+    +'.ml{color:#888;padding-right:14px!important;white-space:nowrap}.mv{font-weight:600}'
+    +'.note{font-size:11px;color:#666;margin:8px 0 12px}'
+    +'table.leg{width:100%;border-collapse:collapse;font-size:11px;table-layout:fixed}'
+    +'table.leg thead{display:table-header-group}'
+    +'table.leg th{background:#0d1b2e;color:#fff;text-align:left;padding:6px 6px;font-size:9px;text-transform:uppercase;letter-spacing:0.3px}'
+    +'table.leg td{padding:5px 6px;border-bottom:1px solid #ccc;vertical-align:middle;overflow-wrap:break-word;word-wrap:break-word}'
+    +'table.leg tr{page-break-inside:avoid}'
+    +'th.write{width:13%}th.cnum{width:5%}th.ph{width:4%}'
+    +'td.cnum{font-weight:700;text-align:center;background:#f4f4f4}td.cnum.blank{background:#fff}'
+    +'td.ph{text-align:center}.dot{display:inline-block;width:10px;height:10px;border-radius:50%}'
+    +'td.desc{font-weight:600;font-size:12px}.sub{font-weight:400;font-size:10px;color:#777;margin-top:1px}.muted{color:#aaa;font-weight:400}'
+    +'.spare{display:inline-block;padding:1px 6px;border-radius:10px;background:#eee;color:#999;font-size:9px;font-weight:700;letter-spacing:0.5px}'
+    +'.rgt{border-left:2px solid #0d1b2e}'
+    +'td.write{background:#f7f7f4;border-left:1px solid #ddd;border-right:1px solid #ddd}'
+    +'.foot{margin-top:14px;font-size:10px;color:#aaa;text-align:center}';
+  const bodyInner='<div class="hdr"><div class="brandwrap"><img class="rlogo" src="'+RLOGO+'"><div class="brand">DOLZELEC</div></div><div class="htitle">Switchboard Legend</div></div>'
+    +'<div class="wrap">'
+    +'<table class="mtab">'+metaRows+'</table>'
+    +'<div class="note">'+(horizontal?'Two columns mirror the board&rsquo;s two rows &mdash; left = top row (1&ndash;'+half+'), right = bottom row ('+(half+1)+'&ndash;'+ways+').':'Two columns mirror the switchboard &mdash; left = odd circuits (1, 3, 5&hellip;), right = even (2, 4, 6&hellip;), reading across then down.')+' The shaded <strong>&ldquo;As labelled&rdquo;</strong> strips on the outer edges are blank: write the board&rsquo;s own circuit numbers there where they differ from ours.</div>'
+    +'<table class="leg"><thead><tr><th class="write">As labelled</th><th class="cnum">#</th>'+phHead+'<th>Circuit / description</th><th class="cnum rgt">#</th>'+phHead+'<th>Circuit / description</th><th class="write">As labelled</th></tr></thead><tbody>'+body+'</tbody></table>'
+    +'<div class="foot">DolzElec Switchboard Legend &middot; '+esc(b.name||'Board')+' &middot; Printed '+esc(gen)+'</div>'
+    +'</div>';
+  const html='<!doctype html><html><head><meta charset="utf-8"><title>'+title+'</title><style>'+css+'</style></head><body>'+bodyInner+'</body></html>';
+  return {b:b,site:site,html:html,title:title};
+}
+function printLegend(){
+  const r=buildLegend();if(!r)return;
+  const ifr=document.createElement('iframe');
+  ifr.setAttribute('aria-hidden','true');
+  ifr.style.cssText='position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden';
+  document.body.appendChild(ifr);
+  let done=false;
+  function go(){if(done)return;done=true;setTimeout(function(){try{ifr.contentWindow.focus();ifr.contentWindow.print();}catch(e){showToast('Print not available');}setTimeout(function(){ifr.remove();},1500);},250);}
+  ifr.onload=go;
+  const doc=ifr.contentWindow.document;doc.open();doc.write(r.html);doc.close();
+  setTimeout(go,400);
+}
 async function emailReport(){
   if(S.readOnly){promptLogin();return;}
   const r=buildRcdReport();if(!r)return;
@@ -1188,7 +1318,7 @@ function supplyCardHtml(b){
 }
 function phaseTabStyle(c,i,b){
   if(dev3ph(c))return 'background:linear-gradient(180deg,#c0392b 0 33%,#9E9E9E 33% 66%,#2980b9 66% 100%)';
-  return 'background:'+phaseColor(phaseFor(i,b.supply_type));
+  return 'background:'+phaseColor(phaseForSlot(i,b.ways,b.orientation,b.supply_type));
 }
 function circuitCardHtml(c,i,b,span,horizontal){
   const status=statusColor(c);
@@ -1199,7 +1329,9 @@ function circuitCardHtml(c,i,b,span,horizontal){
   const style=horizontal?`grid-column:span ${span}`:`height:${span>1?(span*54+(span-1)*4):54}px`;
   const cls='circuit-card'+(c.isolated?' isolated':'')+(spare?' spare':'');
   const badge=c.isolated?'<span class="iso-badge">⚠ ISO</span>':spare?'<span class="circuit-card-chip" style="background:#eee;color:#999">SPARE</span>':chipHtml(status);
-  const numLabel=(h3&&span>1)?('Circuits '+i+'–'+(i+span-1)):('Circuit '+i);
+  const step=horizontal?1:2;
+  const spanSlots=[];for(let k=0;k<span;k++)spanSlots.push(i+k*step);
+  const numLabel=(h3&&span>1)?('Circuits '+spanSlots.join(', ')):('Circuit '+i);
   return `<div class="${cls}" style="${style}" onclick="selCircuit('${c.id}')">
     <div class="phase-tab" style="${phaseTabStyle(c,i,b)}"></div>
     <div class="circuit-card-inner">
@@ -1250,6 +1382,7 @@ function drawBoard(app){
     if(rcdN&&!S.readOnly)h+=`<button class="add-btn" style="width:calc(100% - 20px);margin:8px 10px 2px;justify-content:center" onclick="startRcdRun()">\u26a1 Test all RCDs (${rcdN})</button>`;
     if(rcdN)h+=`<button class="ghost-btn" style="width:calc(100% - 20px);margin:6px 10px 2px;justify-content:center" onclick="generateReport()">\ud83d\udcc4 Compliance report (save / print)</button>`;
     if(rcdN&&!S.readOnly)h+=`<button class="ghost-btn" style="width:calc(100% - 20px);margin:6px 10px 2px;justify-content:center" onclick="emailReport()">\u2709\ufe0f Email report to site</button>`;
+    if(S.circuits.length)h+=`<button class="ghost-btn" style="width:calc(100% - 20px);margin:6px 10px 2px;justify-content:center" onclick="printLegend()">\ud83d\udda8\ufe0f Print legend (hardcopy for board)</button>`;
     // Phase legend for 3-phase
     if(isThreePhase){
       h+=`<div class="phase-legend">
@@ -1259,44 +1392,48 @@ function drawBoard(app){
       </div>`;
     }
 
-    // 3-phase spanning: a 3φ circuit merges its slot + adjacent free slots (up to 3).
-    // Horizontal boards flow as one wrapping grid; vertical boards use two columns.
+    // 3-phase spanning: a 3φ circuit merges its slot + adjacent free physical slots.
+    // Vertical spans down a column (n, n+2, n+4); horizontal spans along a row (n, n+1, n+2).
     const horizontal=b.orientation==='horizontal';
     const spanOf={},hidden={};
     S.circuits.forEach(c=>{
       if(!dev3ph(c))return;
       const n=parseInt(c.number);if(isNaN(n))return;
-      const colEnd=horizontal?ways:((n<=half)?half:ways);
       let span=1;
-      for(let k=1;k<=2;k++){const s=n+k;if(s<=colEnd&&!bySlot[s]){span++;hidden[s]=n;}else break;}
+      for(const s of threePhaseNeighbors(n,ways,b.orientation)){
+        if(!bySlot[s]){span++;hidden[s]=n;}else break;
+      }
       spanOf[n]=span;
     });
 
     if(horizontal){
-      h+=`<div class="sb-grid-h">`;
+      // Two fixed rows: top row 1..half, bottom row half+1..ways (row-major fill).
+      h+=`<div class="rotate-hint">↻ Rotate your phone to view this board in landscape</div>`;
+      h+=`<div style="overflow-x:auto"><div class="sb-grid-h" style="grid-template-columns:repeat(${half},minmax(120px,1fr))">`;
       for(let i=1;i<=ways;i++){
         if(hidden[i])continue;
         const c=bySlot[i];
         if(c){h+=circuitCardHtml(c,i,b,spanOf[i]||1,true);}
-        else{h+=emptySlotHtml(i,phaseColor(phaseFor(i,b.supply_type)));}
+        else{h+=emptySlotHtml(i,phaseColor(phaseForSlot(i,b.ways,b.orientation,b.supply_type)));}
       }
-      h+=`</div>`;
+      h+=`</div></div>`;
     }else{
+      // Across-then-down: left column = odd slots, right column = even slots.
       h+=`<div class="sb-grid">
         <div class="sb-col">
-          <div class="sb-col-label">Circuits 1–${half}</div>`;
-      for(let i=1;i<=half;i++){
+          <div class="sb-col-label">Left</div>`;
+      for(let i=1;i<=ways;i+=2){
         if(hidden[i])continue;
         const c=bySlot[i];
         if(c){h+=circuitCardHtml(c,i,b,spanOf[i]||1);}
-        else{h+=emptySlotHtml(i,phaseColor(phaseFor(i,b.supply_type)));}
+        else{h+=emptySlotHtml(i,phaseColor(phaseForSlot(i,b.ways,b.orientation,b.supply_type)));}
       }
-      h+=`</div><div class="sb-col"><div class="sb-col-label">Circuits ${half+1}–${ways}</div>`;
-      for(let i=half+1;i<=ways;i++){
+      h+=`</div><div class="sb-col"><div class="sb-col-label">Right</div>`;
+      for(let i=2;i<=ways;i+=2){
         if(hidden[i])continue;
         const c=bySlot[i];
         if(c){h+=circuitCardHtml(c,i,b,spanOf[i]||1);}
-        else{h+=emptySlotHtml(i,phaseColor(phaseFor(i,b.supply_type)));}
+        else{h+=emptySlotHtml(i,phaseColor(phaseForSlot(i,b.ways,b.orientation,b.supply_type)));}
       }
       h+=`</div></div>`;
     }
@@ -1308,7 +1445,7 @@ function drawBoard(app){
     }else{
       S.circuits.slice().sort((a,b)=>(parseInt(a.number)||0)-(parseInt(b.number)||0)).forEach(c=>{
         const status=statusColor(c);
-        const ph=phaseFor(parseInt(c.number)||1,b.supply_type);
+        const ph=phaseForSlot(parseInt(c.number)||1,b.ways,b.orientation,b.supply_type);
         h+=`<div style="display:flex;align-items:center;gap:10px;padding:9px 12px;background:#fff;border:0.5px solid #e8e8e8;border-radius:10px;margin-bottom:6px;cursor:pointer" onclick="selCircuit('${c.id}')">
           <div style="width:4px;align-self:stretch;border-radius:2px;background:${phaseColor(ph)};flex-shrink:0"></div>
           <div style="width:34px;height:34px;border-radius:7px;background:#0d1b2e;color:#f0a500;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0">${esc(c.number)}</div>
@@ -1409,7 +1546,7 @@ function drawCircuit(app){
     nextColor=diff<0?'#A32D2D':diff<30?'#854F0B':'#3B6D11';
   }
   const b=S.selectedBoard;
-  const ph=phaseFor(parseInt(c.number)||1,b?.supply_type||'three_phase');
+  const ph=phaseForSlot(parseInt(c.number)||1,b?.ways||24,b?.orientation,b?.supply_type||'three_phase');
   const phColor=phaseColor(ph);
   const phLabel={R:'Red phase',W:'White phase',B:'Blue phase',SP:'Single phase'}[ph]||'—';
 
@@ -1516,7 +1653,7 @@ function drawModal(){
   if(S.modal==='add-circuit'){
     const slot=S._addSlot||1;
     const b=S.selectedBoard;
-    const ph=phaseFor(slot,b?.supply_type||'three_phase');
+    const ph=phaseForSlot(slot,b?.ways||24,b?.orientation,b?.supply_type||'three_phase');
     const phLabel={R:'Red phase',W:'White phase',B:'Blue phase',SP:'Single phase'}[ph]||'—';
     const phColor=phaseColor(ph);
     const dft=(S._circuitDraft&&S._circuitDraft.kind==='add')?S._circuitDraft:null;
@@ -1704,13 +1841,12 @@ function getPin(){
 // the List view), so a single 3φ breaker renders as one card spanning three, not three separate ones.
 async function absorbThreePhaseSlots(n,selfId,userName){
   if(isNaN(n))return true;
-  const ways=(S.selectedBoard&&S.selectedBoard.ways)||24;
-  const half=Math.ceil(ways/2);
-  const colEnd=(n<=half)?half:ways;
+  const bd=S.selectedBoard||{};
+  const ways=bd.ways||24;
   const bySlot={};
   S.circuits.forEach(x=>{const nn=parseInt(x.number);if(!isNaN(nn))bySlot[nn]=x;});
   const conflicts=[];
-  for(let k=1;k<=2;k++){const s=n+k;if(s>colEnd)break;const cc=bySlot[s];if(cc&&cc.id!==selfId)conflicts.push(cc);}
+  for(const s of threePhaseNeighbors(n,ways,bd.orientation)){const cc=bySlot[s];if(cc&&cc.id!==selfId)conflicts.push(cc);}
   if(!conflicts.length)return true;
   const names=conflicts.map(c=>'Circuit '+c.number+(c.label?' — '+c.label:'')).join(' and ');
   if(!confirm('This 3-phase breaker occupies 3 ways.\n\n'+names+' will be archived (you can restore them anytime from the List view). Continue?'))return false;
