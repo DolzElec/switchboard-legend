@@ -1118,35 +1118,26 @@ function printLegend(){
   const r=buildLegend();if(!r)return;
   const ifr=document.createElement('iframe');
   ifr.setAttribute('aria-hidden','true');
-  // Render offscreen at ~A4 printable width so we can measure height and scale to fit one page.
+  // Offscreen at ~A4 printable width so measurement matches print layout.
   ifr.style.cssText='position:fixed;left:-9999px;top:0;width:703px;height:1040px;border:0;background:#fff';
   document.body.appendChild(ifr);
-  let done=false;
-  function fitOnePage(){
-    try{
-      const d=ifr.contentWindow.document;
-      const inner=d.querySelector('.sheet-scale'),wrap=d.querySelector('.sheet-wrap');
-      if(!inner||!wrap)return;
-      const PRINTABLE_H=1030;   // A4 (297mm) minus 12mm top+bottom margins, at ~96dpi
-      // Some mobile browsers lay the offscreen frame out at their own width, so the
-      // measured height is unreliable. Use the larger of measured vs a row-count estimate.
-      const rows=(d.querySelectorAll('table.leg tbody tr')||[]).length;
+  const win=ifr.contentWindow,d=win.document;
+  d.open();d.write(r.html);d.close();
+  // Scale to a single A4 page. Measure synchronously — the doc is inline (styles in a
+  // <style>, logo is a data URI, .rlogo has a fixed height) so it lays out immediately;
+  // reading scrollHeight forces layout. Fall back to a row-count estimate if it isn't ready.
+  try{
+    const inner=d.querySelector('.sheet-scale'),wrap=d.querySelector('.sheet-wrap');
+    if(inner&&wrap){
+      const rows=d.querySelectorAll('table.leg tbody tr').length;
       const h=Math.max(inner.scrollHeight,200+rows*46);
-      if(h>PRINTABLE_H){
-        const s=Math.max(0.35,(PRINTABLE_H-2)/h);
-        inner.style.transform='scale('+s+')';
-        wrap.style.height=Math.ceil(h*s)+'px';   // shrink layout box too, so print sees one page
-      }
-    }catch(e){}
-  }
-  function go(){
-    if(done)return;done=true;
-    fitOnePage();
-    setTimeout(function(){try{ifr.contentWindow.focus();ifr.contentWindow.print();}catch(e){showToast('Print not available');}setTimeout(function(){ifr.remove();},1500);},300);
-  }
-  ifr.onload=go;
-  const doc=ifr.contentWindow.document;doc.open();doc.write(r.html);doc.close();
-  setTimeout(go,600);
+      if(h>1030){const s=Math.max(0.35,1028/h);inner.style.transform='scale('+s+')';wrap.style.height=Math.ceil(h*s)+'px';}
+    }
+  }catch(e){}
+  // Print synchronously, still inside the button's click gesture, so the browser
+  // doesn't block it as "automatic printing" (which silently no-ops on mobile).
+  try{win.focus();win.print();}catch(e){showToast('Print not available');}
+  setTimeout(function(){try{ifr.remove();}catch(e){}},2000);
 }
 async function emailReport(){
   if(S.readOnly){promptLogin();return;}
